@@ -1,8 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { LogOut, User } from 'lucide-react';
+import { Download, LogOut, User } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar } from './ui/avatar';
+import { Button } from './ui/button';
 import { ThemeToggle } from './ThemeToggle';
+import { usePWAInstall } from '../lib/pwa';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +17,7 @@ import {
 export function Navbar() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
+  const { canInstall, install } = usePWAInstall();
 
   return (
     <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur">
@@ -27,6 +30,19 @@ export function Navbar() {
         </Link>
 
         <div className="flex items-center gap-2">
+          {canInstall && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={install}
+              className="gap-1.5 text-xs font-medium"
+              title="Install Talkiee as an app"
+            >
+              <Download className="size-3.5" />
+              <span className="hidden sm:inline">Install app</span>
+              <span className="sm:hidden">Install</span>
+            </Button>
+          )}
           <ThemeToggle />
           {profile && (
           <DropdownMenu>
@@ -42,6 +58,11 @@ export function Navbar() {
               <DropdownMenuItem onClick={() => navigate('/dashboard')}>
                 <User /> Dashboard
               </DropdownMenuItem>
+              {canInstall && (
+                <DropdownMenuItem onClick={install}>
+                  <Download /> Install app
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={async () => {
                   await signOut();

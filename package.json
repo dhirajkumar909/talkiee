@@ -10,5 +10,11 @@
     "dev": "npm run dev --workspace client",
     "build": "npm run build --workspace client",
     "preview": "npm run preview --workspace client"
+  },
+  "overrides": {
+    "vite-plugin-pwa": {
+      "workbox-build": "7.1.1"
+    },
+    "workbox-build": "7.1.1"
   }
 }

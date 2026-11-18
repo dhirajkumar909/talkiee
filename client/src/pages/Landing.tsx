@@ -1,11 +1,13 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Users, Map, Mic } from 'lucide-react';
+import { ArrowRight, Download, Users, Map, Mic } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useAuth } from '../auth/AuthProvider';
+import { usePWAInstall } from '../lib/pwa';
 
 export function Landing() {
   const { session } = useAuth();
+  const { canInstall, install } = usePWAInstall();
 
   return (
     <div className="min-h-screen bg-dots">
@@ -17,6 +19,19 @@ export function Landing() {
           talkiee
         </div>
         <nav className="flex items-center gap-2">
+          {canInstall && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={install}
+              className="gap-1.5"
+              title="Install Talkiee as an app"
+            >
+              <Download className="size-4" />
+              <span className="hidden sm:inline">Install app</span>
+              <span className="sm:hidden">Install</span>
+            </Button>
+          )}
           <ThemeToggle />
           {session ? (
             <Button asChild>
