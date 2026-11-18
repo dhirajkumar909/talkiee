@@ -220,13 +220,16 @@ export function drawAvatars(
   followingId?: string | null,
   hearingRange = HEARING_RANGE,
 ) {
+  // Use the smoothed on-screen position (falls back to the authoritative one).
+  const rx = (q: PresenceState) => q.rx ?? q.x;
+  const ry = (q: PresenceState) => q.ry ?? q.y;
   const me = players.get(selfId);
 
   if (me) {
     // Hearing radius (hidden when isolated inside an audio room).
     if (showHearingRange) {
       ctx.beginPath();
-      ctx.arc(me.x, me.y, hearingRange, 0, Math.PI * 2);
+      ctx.arc(rx(me), ry(me), hearingRange, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(56,189,248,0.05)';
       ctx.fill();
       ctx.strokeStyle = 'rgba(56,189,248,0.22)';
@@ -239,8 +242,8 @@ export function drawAvatars(
     for (const [id, p] of players) {
       if (connected.has(id)) {
         ctx.beginPath();
-        ctx.moveTo(me.x, me.y);
-        ctx.lineTo(p.x, p.y);
+        ctx.moveTo(rx(me), ry(me));
+        ctx.lineTo(rx(p), ry(p));
         ctx.strokeStyle = 'rgba(34,197,94,0.5)';
         ctx.lineWidth = 2;
         ctx.stroke();
@@ -250,11 +253,13 @@ export function drawAvatars(
 
   for (const [id, p] of players) {
     const isSelf = id === selfId;
+    const x = rx(p);
+    const y = ry(p);
 
     // Amber dashed ring around whoever we're following.
     if (id === followingId) {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, AVATAR_RADIUS + 6, 0, Math.PI * 2);
+      ctx.arc(x, y, AVATAR_RADIUS + 6, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(245,158,11,0.95)';
       ctx.lineWidth = 2.5;
       ctx.setLineDash([5, 4]);
@@ -263,7 +268,7 @@ export function drawAvatars(
     }
 
     ctx.beginPath();
-    ctx.arc(p.x, p.y, AVATAR_RADIUS, 0, Math.PI * 2);
+    ctx.arc(x, y, AVATAR_RADIUS, 0, Math.PI * 2);
     ctx.fillStyle = p.color;
     ctx.fill();
     ctx.lineWidth = isSelf ? 3.5 : 2;
@@ -275,14 +280,14 @@ export function drawAvatars(
     ctx.textBaseline = 'bottom';
     const w = ctx.measureText(p.name).width;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    roundRect(ctx, p.x - w / 2 - 5, p.y - AVATAR_RADIUS - 22, w + 10, 17, 5);
+    roundRect(ctx, x - w / 2 - 5, y - AVATAR_RADIUS - 22, w + 10, 17, 5);
     ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.fillText(p.name, p.x, p.y - AVATAR_RADIUS - 7);
+    ctx.fillText(p.name, x, y - AVATAR_RADIUS - 7);
 
     // Mute/deafen badge at the lower-right of the avatar (deafen implies mute).
-    if (p.deafened) drawStatusBadge(ctx, p.x + AVATAR_RADIUS * 0.75, p.y + AVATAR_RADIUS * 0.75, 'deafened');
-    else if (p.muted) drawStatusBadge(ctx, p.x + AVATAR_RADIUS * 0.75, p.y + AVATAR_RADIUS * 0.75, 'muted');
+    if (p.deafened) drawStatusBadge(ctx, x + AVATAR_RADIUS * 0.75, y + AVATAR_RADIUS * 0.75, 'deafened');
+    else if (p.muted) drawStatusBadge(ctx, x + AVATAR_RADIUS * 0.75, y + AVATAR_RADIUS * 0.75, 'muted');
   }
 }
 

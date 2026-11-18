@@ -121,6 +121,7 @@ export function OfficeRoom() {
   const [customUrl, setCustomUrl] = useState('');
   const [searching, setSearching] = useState(false);
   const [mutedSpeakers, setMutedSpeakers] = useState<Set<string>>(new Set());
+  const [speakerVolumes, setSpeakerVolumes] = useState<Map<string, number>>(new Map());
   const [mutedPeers, setMutedPeers] = useState<Set<string>>(new Set());
   const [following, setFollowing] = useState<string | null>(null);
   const followingRef = useRef<string | null>(null);
@@ -141,6 +142,7 @@ export function OfficeRoom() {
   const connectedRef = useRef<Set<string>>(new Set());
   const officeRef = useRef<Office | null>(null);
   const lastEmit = useRef(0);
+  const lastFrame = useRef(0);
   const micOkRef = useRef(false);
   const deafenedRef = useRef(false);
   const musicPlayingRef = useRef(false);
@@ -152,6 +154,10 @@ export function OfficeRoom() {
   useEffect(() => {
     mutedSpeakersRef.current = mutedSpeakers;
   }, [mutedSpeakers]);
+  const speakerVolumesRef = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    speakerVolumesRef.current = speakerVolumes;
+  }, [speakerVolumes]);
   // True once a peer has told us what's playing — suppresses the localStorage
   // restore so we don't revive a song others have already moved on from.
   const musicReceivedRef = useRef(false);
@@ -423,6 +429,23 @@ export function OfficeRoom() {
 
   const stopMusic = useCallback(() => changeMusic('stream', '', ''), [changeMusic]);
 
+  // Per-speaker local volume (0..1) + mute — just for yourself.
+  const setSpeakerVolume = useCallback((speakerId: string, v: number) => {
+    setSpeakerVolumes((prev) => {
+      const next = new Map(prev);
+      next.set(speakerId, v);
+      return next;
+    });
+  }, []);
+  const toggleSpeakerMute = useCallback((speakerId: string) => {
+    setMutedSpeakers((prev) => {
+      const next = new Set(prev);
+      if (next.has(speakerId)) next.delete(speakerId);
+      else next.add(speakerId);
+      return next;
+    });
+  }, []);
+
   // Find another player whose avatar is at a canvas point (for follow).
   const playerAt = useCallback(
     (px: number, py: number): string | null => {
@@ -509,7 +532,9 @@ export function OfficeRoom() {
 
       // Speaker music: loudest audible speaker wins, each with its own range
       // (ones this user muted are skipped).
-      musicRef.current?.setProximityVolume(speakerVolumeAt(layout, me, mutedSpeakersRef.current));
+      musicRef.current?.setProximityVolume(
+        speakerVolumeAt(layout, me, mutedSpeakersRef.current, speakerVolumesRef.current),
+      );
 
       const myRoom = roomAt(layout, me.x, me.y);
       setInRoom(myRoom ? myRoom.label ?? 'Meeting Room' : null);
@@ -616,6 +641,31 @@ export function OfficeRoom() {
             lastEmit.current = now;
           }
         }
+        // Smoothly interpolate remote avatars toward their latest position so
+        // the ~50ms broadcast steps don't look like teleporting. Self is drawn
+        // at its true position (already updated every frame locally).
+        const now = performance.now();
+        const dt = lastFrame.current ? Math.min(0.1, (now - lastFrame.current) / 1000) : 0;
+        lastFrame.current = now;
+        const smooth = 1 - Math.exp(-dt / 0.08); // ~time-constant 80ms
+        for (const [uid, p] of playersRef.current) {
+          if (uid === profile.id) {
+            p.rx = p.x;
+            p.ry = p.y;
+            continue;
+          }
+          if (p.rx === undefined || p.ry === undefined) {
+            p.rx = p.x;
+            p.ry = p.y;
+          } else if (Math.hypot(p.x - p.rx, p.y - p.ry) > CELL * 4) {
+            p.rx = p.x; // big jump (join/teleport) → snap, don't glide across the floor
+            p.ry = p.y;
+          } else {
+            p.rx += (p.x - p.rx) * smooth;
+            p.ry += (p.y - p.ry) * smooth;
+          }
+        }
+
         drawFloor(ctx, layout);
         if (musicPlayingRef.current) {
           drawSpeakerPulses(ctx, layout, performance.now(), mutedSpeakersRef.current);
@@ -922,17 +972,52 @@ export function OfficeRoom() {
                 {deafened && music.playing && (
                   <p className="mt-2 text-xs text-muted-foreground">Un-deafen to hear the music.</p>
                 )}
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Tip: tap a 🔊 speaker on the floor to mute it just for you.
-                </p>
-                {mutedSpeakers.size > 0 && (
-                  <button
-                    onClick={() => setMutedSpeakers(new Set())}
-                    className="mt-1 text-xs font-medium text-primary hover:underline"
-                  >
-                    Unmute {mutedSpeakers.size} muted speaker{mutedSpeakers.size > 1 ? 's' : ''}
-                  </button>
-                )}
+
+                {/* Per-speaker volume, local to you */}
+                <div className="mt-4 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">Speaker volume (just for you)</p>
+                  {office.layout.items
+                    .filter((it) => it.type === 'speaker')
+                    .map((sp, i) => {
+                      const spMuted = mutedSpeakers.has(sp.id);
+                      const vol = spMuted ? 0 : Math.round((speakerVolumes.get(sp.id) ?? 1) * 100);
+                      return (
+                        <div key={sp.id} className="flex items-center gap-2">
+                          <button
+                            onClick={() => toggleSpeakerMute(sp.id)}
+                            title={spMuted ? 'Unmute for yourself' : 'Mute for yourself'}
+                            className="shrink-0 text-muted-foreground hover:text-foreground"
+                          >
+                            {spMuted ? (
+                              <VolumeX className="size-4 text-destructive" />
+                            ) : (
+                              <Volume2 className="size-4" />
+                            )}
+                          </button>
+                          <span className="w-16 shrink-0 text-xs">🔊 Speaker {i + 1}</span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={vol}
+                            onChange={(e) => {
+                              const v = Number(e.target.value) / 100;
+                              // Dragging the slider off 0 also un-mutes it.
+                              if (spMuted && v > 0) toggleSpeakerMute(sp.id);
+                              setSpeakerVolume(sp.id, v);
+                            }}
+                            className="h-1 flex-1 cursor-pointer accent-violet-500"
+                          />
+                          <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                            {vol}%
+                          </span>
+                        </div>
+                      );
+                    })}
+                  <p className="text-xs text-muted-foreground">
+                    Or tap a 🔊 speaker on the floor to mute it.
+                  </p>
+                </div>
               </>
             )}
           </div>

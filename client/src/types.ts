@@ -85,6 +85,9 @@ export interface PresenceState {
   color: string;
   x: number;
   y: number;
+  /** Smoothed on-screen position (interpolates toward x/y); set by the renderer. */
+  rx?: number;
+  ry?: number;
   /** Their own mic muted? (broadcast; shown on their avatar) */
   muted?: boolean;
   /** They've deafened themselves? (broadcast; shown on their avatar) */

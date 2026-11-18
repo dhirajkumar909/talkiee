@@ -172,7 +172,7 @@ RLS ensures you only ever read offices you own or belong to.
 - ✅ Follow another user (with wall-aware pathfinding)
 - ✅ Mobile support (responsive layout + on-screen joystick)
 - ✅ Editor: multi-select, group move, undo/redo, customizable ranges
-- Smooth interpolation of remote avatar movement between updates
+- ✅ Smooth interpolation of remote avatar movement between updates
 - Server-authoritative movement + interest management (for very large rooms / anti-cheat)
 - Social login (Google/GitHub), real-time dashboard updates
 - Screen share & video

@@ -598,18 +598,21 @@ export function speakerVolumeAt(
   layout: OfficeLayout,
   listener: { x: number; y: number },
   muted?: Set<string>,
+  gains?: Map<string, number>,
 ): number {
   let vol = 0;
   for (const item of layout.items) {
     if (item.type !== "speaker") continue;
     if (muted?.has(item.id)) continue;
+    const gain = gains?.get(item.id) ?? 1;
+    if (gain <= 0) continue; // this listener turned it all the way down
     const center = {
       x: (item.x + item.w / 2) * CELL,
       y: (item.y + item.h / 2) * CELL,
     };
     const dist = audioDistance(layout, listener, center);
     const { hearing, full } = speakerRanges(item);
-    vol = Math.max(vol, volumeForDistance(dist, full, hearing));
+    vol = Math.max(vol, volumeForDistance(dist, full, hearing) * gain);
     if (vol >= 1) break;
   }
   return vol;
