@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ArrowLeft,
+  Bell,
+  BellOff,
   Headphones,
   HeadphoneOff,
   Footprints,
@@ -20,6 +22,13 @@ import { useAuth } from '../auth/AuthProvider';
 import { getOffice, getLivekitToken } from '../lib/api';
 import type { MusicState, Office, PresenceState } from '../types';
 import { OfficeChannel } from '../office/realtime';
+import {
+  isNotificationSupported,
+  getNotificationPermission,
+  requestNotificationPermission,
+  notifyMemberJoin,
+  notifyMemberLeave,
+} from '../lib/notifications';
 import { LiveKitVoice } from '../office/voice-livekit';
 import { SpeakerAudio, parseYouTubeId, parseYouTubePlaylistId } from '../office/music';
 import { searchSong } from '../office/search';
@@ -168,6 +177,58 @@ export function OfficeRoom() {
     deafenedRef.current = deafened;
   }, [deafened]);
 
+  const [notifyPerm, setNotifyPerm] = useState<NotificationPermission>(() => getNotificationPermission());
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('talkiee:notifications') !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const notificationsEnabledRef = useRef(notificationsEnabled);
+  useEffect(() => {
+    notificationsEnabledRef.current = notificationsEnabled;
+  }, [notificationsEnabled]);
+  const namesRef = useRef<Map<string, string>>(new Map());
+
+  const handleNotificationToggle = async () => {
+    if (!isNotificationSupported()) {
+      toast.error('Notifications are not supported by your browser');
+      return;
+    }
+
+    if (notifyPerm === 'default') {
+      const res = await requestNotificationPermission();
+      setNotifyPerm(res);
+      if (res === 'granted') {
+        setNotificationsEnabled(true);
+        try {
+          localStorage.setItem('talkiee:notifications', 'true');
+        } catch {
+          /* ignore */
+        }
+        toast.success('Desktop notifications enabled');
+        return;
+      } else if (res === 'denied') {
+        toast.error('Notifications were blocked in your browser settings');
+        return;
+      }
+    }
+
+    const next = !notificationsEnabled;
+    setNotificationsEnabled(next);
+    try {
+      localStorage.setItem('talkiee:notifications', String(next));
+    } catch {
+      /* ignore */
+    }
+    if (next) {
+      toast.success('Notifications unmuted');
+    } else {
+      toast.info('Notifications muted');
+    }
+  };
+
   // Toggle mic mute. Deafen couples the mic (deafen → mute, undeafen → unmute
   // if a mic is available), mirroring Discord. Effects below sync the voice layer.
   const toggleMute = useCallback(() => {
@@ -257,6 +318,9 @@ export function OfficeRoom() {
 
     const channel = new OfficeChannel(id, me, {
       onRoster: (states) => {
+        for (const s of states) {
+          namesRef.current.set(s.userId, s.name);
+        }
         const present = new Set(states.map((s) => s.userId));
         for (const uid of [...playersRef.current.keys()]) {
           if (uid !== me.userId && !present.has(uid)) playersRef.current.delete(uid);
@@ -270,6 +334,19 @@ export function OfficeRoom() {
           } else {
             playersRef.current.set(s.userId, { ...s });
           }
+        }
+      },
+      onJoin: (user) => {
+        namesRef.current.set(user.userId, user.name);
+        if (notificationsEnabledRef.current) {
+          notifyMemberJoin(user.name, officeRef.current?.name);
+        }
+      },
+      onLeave: ({ userId, name }) => {
+        const displayName = name || namesRef.current.get(userId) || playersRef.current.get(userId)?.name || 'Someone';
+        namesRef.current.delete(userId);
+        if (notificationsEnabledRef.current) {
+          notifyMemberLeave(displayName, officeRef.current?.name);
         }
       },
       onMove: ({ userId, x, y }) => {
@@ -324,6 +401,7 @@ export function OfficeRoom() {
       musicRef.current = null;
       playersRef.current.clear();
       connectedRef.current.clear();
+      namesRef.current.clear();
     };
     // Only (re)run when readiness flips — never on object-identity churn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -717,6 +795,29 @@ export function OfficeRoom() {
           <h1 className="font-semibold">{office.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {isNotificationSupported() && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleNotificationToggle}
+              title={
+                notifyPerm === 'denied'
+                  ? 'Notifications blocked by browser settings'
+                  : notifyPerm === 'default'
+                  ? 'Enable desktop notifications'
+                  : notificationsEnabled
+                  ? 'Notifications enabled (click to mute)'
+                  : 'Notifications muted (click to unmute)'
+              }
+              aria-label="Toggle notifications"
+            >
+              {notifyPerm === 'denied' || !notificationsEnabled ? (
+                <BellOff className="h-4 w-4 text-muted-foreground" />
+              ) : (
+                <Bell className={cn('h-4 w-4', notifyPerm === 'granted' ? 'text-primary' : 'text-foreground')} />
+              )}
+            </Button>
+          )}
           <ThemeToggle />
           {isOwner && (
             <Button variant="outline" size="sm" onClick={() => navigate(`/office/${office.id}/edit`)}>

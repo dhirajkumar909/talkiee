@@ -99,7 +99,7 @@ export const ITEM_META: Record<ItemType, ItemMeta> = {
     color: "#92400e",
     defaultW: 2,
     defaultH: 1,
-    solid: true,
+    solid: false,
     zone: false,
     audioRoom: false,
     icon: "🖥️",

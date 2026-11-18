@@ -13,6 +13,10 @@ export interface OfficeChannelHandlers {
   onMusic: (state: MusicState) => void;
   /** A peer toggled their own mic-mute / deafen. */
   onStatus: (status: StatusPayload) => void;
+  /** Another member joined the office. */
+  onJoin?: (user: PresenceState) => void;
+  /** Another member left the office. */
+  onLeave?: (user: { userId: string; name?: string }) => void;
 }
 
 /**
@@ -27,6 +31,11 @@ export class OfficeChannel {
   private music: MusicState | null = null;
   /** Our own mute/deafen status, re-sent to late joiners. */
   private status: StatusPayload | null = null;
+  /** Tracks whether the initial presence sync has completed to avoid join spam on room entry. */
+  private initialSyncDone = false;
+  /** Active remote members tracked to deduplicate join/leave events. */
+  private activeMembers = new Set<string>();
+  private syncTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(officeId: string, me: PresenceState, handlers: OfficeChannelHandlers) {
     this.me = me;
@@ -49,8 +58,20 @@ export class OfficeChannel {
           .map((entries) => entries[0])
           .filter(Boolean);
         handlers.onRoster(roster);
+
+        if (!this.initialSyncDone) {
+          for (const user of roster) {
+            if (user.userId !== this.me.userId) {
+              this.activeMembers.add(user.userId);
+            }
+          }
+          if (this.syncTimer) clearTimeout(this.syncTimer);
+          this.syncTimer = setTimeout(() => {
+            this.initialSyncDone = true;
+          }, 800);
+        }
       })
-      .on('presence', { event: 'join' }, ({ key }) => {
+      .on<PresenceState>('presence', { event: 'join' }, ({ key, currentPresences, newPresences }) => {
         // When someone new arrives, re-broadcast our current position so they
         // see us where we actually are (presence only carries our spawn point,
         // and we deliberately never re-track — repeated track() drops the channel).
@@ -60,6 +81,28 @@ export class OfficeChannel {
           if (this.music?.playing) void this.rawSendMusic(this.music);
           // Let the newcomer know our current mute/deafen state.
           if (this.status) void this.rawSendStatus(this.status);
+
+          // If initial sync has completed, alert for members joining
+          if (this.initialSyncDone) {
+            const isFirst = !currentPresences || currentPresences.length === 0;
+            if (isFirst || !this.activeMembers.has(key)) {
+              this.activeMembers.add(key);
+              const user = (newPresences as PresenceState[])?.[0];
+              if (user) {
+                handlers.onJoin?.(user);
+              }
+            }
+          }
+        }
+      })
+      .on<PresenceState>('presence', { event: 'leave' }, ({ key, currentPresences, leftPresences }) => {
+        if (key !== this.me.userId && this.initialSyncDone) {
+          const hasRemaining = currentPresences && currentPresences.length > 0;
+          if (!hasRemaining && this.activeMembers.has(key)) {
+            this.activeMembers.delete(key);
+            const user = (leftPresences as PresenceState[])?.[0];
+            handlers.onLeave?.({ userId: key, name: user?.name });
+          }
         }
       })
       .on('broadcast', { event: 'move' }, ({ payload }) => {
@@ -138,7 +181,12 @@ export class OfficeChannel {
   }
 
   async leave() {
+    if (this.syncTimer) {
+      clearTimeout(this.syncTimer);
+      this.syncTimer = null;
+    }
     this.ready = false;
+    this.activeMembers.clear();
     await this.channel.untrack();
     await supabase.removeChannel(this.channel);
   }
