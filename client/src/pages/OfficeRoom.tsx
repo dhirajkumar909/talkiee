@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   Bell,
@@ -14,8 +14,8 @@ import {
   Mic,
   MicOff,
   Music,
+  ArrowLeft,
   PencilRuler,
-  PhoneOff,
   MapPin,
   Play,
   Radio,
@@ -69,7 +69,6 @@ import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { Joystick } from '../components/Joystick';
 import { ThemeToggle } from '../components/ThemeToggle';
-import { Logo } from '../components/Logo';
 import { cn } from '../lib/utils';
 
 /** How close (px) to trail behind someone you're following. */
@@ -906,15 +905,17 @@ export function OfficeRoom() {
   return (
     <div className="flex h-screen flex-col bg-background">
       <header className="relative z-40 flex h-16 shrink-0 items-center gap-3 border-b bg-background px-3 sm:px-4">
-        {/* Identity: brand mark → office name + where you are */}
+        {/* Leave + office identity */}
         <div className="flex min-w-0 items-center gap-3">
-          <Link
-            to="/dashboard"
-            title="Back to dashboard"
-            className="rounded-lg p-1 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            title="Leave office"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 pl-2 pr-3 text-sm font-semibold text-destructive outline-none transition-colors hover:border-destructive hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-2 focus-visible:ring-destructive"
           >
-            <Logo showWordmark={false} />
-          </Link>
+            <ArrowLeft className="size-[18px]" strokeWidth={2.25} />
+            Leave
+          </button>
           <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -933,10 +934,8 @@ export function OfficeRoom() {
         </div>
 
         {/* Presence: who's here */}
-        <button
-          type="button"
-          onClick={() => setShowRoster(true)}
-          className="mx-auto hidden items-center gap-2.5 rounded-full border bg-muted/40 py-1 pl-1 pr-3 transition-colors hover:bg-muted md:flex md:cursor-default md:hover:bg-muted/40"
+        <div
+          className="mx-auto hidden items-center gap-2.5 rounded-full border bg-muted/40 py-1 pl-1 pr-3 md:flex"
           title={`${roster.length} in this office`}
         >
           <div className="flex -space-x-2">
@@ -956,7 +955,7 @@ export function OfficeRoom() {
             </span>
             {roster.length} online
           </span>
-        </button>
+        </div>
 
         <div className="ml-auto flex items-center gap-2 md:ml-0">
           {/* Voice controls */}
@@ -1037,17 +1036,6 @@ export function OfficeRoom() {
             )}
           </div>
 
-          <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
-
-          <button
-            type="button"
-            onClick={() => navigate('/dashboard')}
-            title="Leave office"
-            className="flex h-9 items-center gap-2 rounded-lg bg-destructive/10 px-3 text-sm font-medium text-destructive outline-none transition-colors hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <PhoneOff className="size-4" strokeWidth={2} />
-            <span className="hidden sm:inline">Leave</span>
-          </button>
         </div>
       </header>
 
