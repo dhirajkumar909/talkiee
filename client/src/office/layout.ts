@@ -64,9 +64,14 @@ export function volumeForDistance(
   return 1 - (dist - fullRange) / (hearingRange - fullRange);
 }
 
+export type ItemCategory = "structure" | "furniture" | "area" | "utility";
+
 export interface ItemMeta {
   type: ItemType;
   label: string;
+  /** One-line explanation of what the item *does* in the office. */
+  description: string;
+  category: ItemCategory;
   /** Fill color on the canvas. */
   color: string;
   /** Default footprint in cells when placed from the palette. */
@@ -74,138 +79,244 @@ export interface ItemMeta {
   defaultH: number;
   /** Blocks movement (avatars cannot walk through it). */
   solid: boolean;
+  /** Blocks voice and music passing through it (walls, shelves). */
+  blocksSound: boolean;
   /** A labeled area rather than an object. */
   zone: boolean;
   /** An enclosed audio room: occupants only hear others in the same room. */
   audioRoom: boolean;
+  /** Part of the barrier family that visually joins to its neighbours (walls, glass, doors). */
+  connects: boolean;
+  /** Can be drag-painted in the editor (one tile per cell). */
+  paintable: boolean;
   icon: string;
 }
 
+const base = {
+  solid: false,
+  blocksSound: false,
+  zone: false,
+  audioRoom: false,
+  connects: false,
+  paintable: false,
+} as const;
+
 export const ITEM_META: Record<ItemType, ItemMeta> = {
+  // ── Structure ────────────────────────────────────────────────────────────
   wall: {
+    ...base,
     type: "wall",
     label: "Wall",
-    color: "#334155",
+    description: "Nobody can walk or talk through it. Use it to split the floor into spaces.",
+    category: "structure",
+    color: "#475569",
     defaultW: 1,
     defaultH: 1,
     solid: true,
-    zone: false,
-    audioRoom: false,
+    blocksSound: true,
+    connects: true,
+    paintable: true,
     icon: "🧱",
   },
+  glass: {
+    ...base,
+    type: "glass",
+    label: "Glass Wall",
+    description: "See-through partition. Blocks walking, but voices carry across it.",
+    category: "structure",
+    color: "#0e7490",
+    defaultW: 1,
+    defaultH: 1,
+    solid: true,
+    connects: true,
+    paintable: true,
+    icon: "🪟",
+  },
+  door: {
+    ...base,
+    type: "door",
+    label: "Door",
+    description: "A gap in a wall people can walk through. It snaps into the wall line around it.",
+    category: "structure",
+    color: "#b45309",
+    defaultW: 1,
+    defaultH: 1,
+    connects: true,
+    icon: "🚪",
+  },
+  // ── Furniture ────────────────────────────────────────────────────────────
   desk: {
+    ...base,
     type: "desk",
     label: "Desk",
+    description: "A workstation. Pair it with a chair to mark where someone sits.",
+    category: "furniture",
     color: "#92400e",
     defaultW: 2,
     defaultH: 1,
-    solid: false,
-    zone: false,
-    audioRoom: false,
     icon: "🖥️",
   },
   chair: {
+    ...base,
     type: "chair",
     label: "Chair",
-    color: "#1f2937",
+    description: "A seat. Walkable, so people can stand right where they work.",
+    category: "furniture",
+    color: "#374151",
     defaultW: 1,
     defaultH: 1,
-    solid: false,
-    zone: false,
-    audioRoom: false,
     icon: "🪑",
   },
-  meeting: {
-    type: "meeting",
-    label: "Meeting Room",
-    color: "#1e3a8a",
-    defaultW: 5,
-    defaultH: 4,
-    solid: false,
-    zone: true,
-    audioRoom: true,
-    icon: "📋",
+  shelf: {
+    ...base,
+    type: "shelf",
+    label: "Bookshelf",
+    description: "Tall storage that soaks up sound. Use it as a quiet divider between desk groups.",
+    category: "furniture",
+    color: "#78350f",
+    defaultW: 2,
+    defaultH: 1,
+    solid: true,
+    blocksSound: true,
+    icon: "📚",
   },
-  lounge: {
-    type: "lounge",
-    label: "Lounge",
-    color: "#3f3f46",
-    defaultW: 4,
-    defaultH: 3,
-    solid: false,
-    zone: true,
-    audioRoom: false,
-    icon: "🛋️",
+  whiteboard: {
+    ...base,
+    type: "whiteboard",
+    label: "Whiteboard",
+    description: "A spot to gather around and brainstorm. Blocks walking, not voices.",
+    category: "furniture",
+    color: "#64748b",
+    defaultW: 2,
+    defaultH: 1,
+    solid: true,
+    icon: "📝",
+  },
+  coffee: {
+    ...base,
+    type: "coffee",
+    label: "Coffee Bar",
+    description: "A counter where people bump into each other for a quick chat.",
+    category: "furniture",
+    color: "#7c2d12",
+    defaultW: 2,
+    defaultH: 1,
+    solid: true,
+    icon: "☕",
   },
   plant: {
+    ...base,
     type: "plant",
     label: "Plant",
+    description: "Decoration that blocks walking. Good for framing paths and corners.",
+    category: "furniture",
     color: "#166534",
     defaultW: 1,
     defaultH: 1,
     solid: true,
-    zone: false,
-    audioRoom: false,
     icon: "🪴",
   },
   rug: {
+    ...base,
     type: "rug",
     label: "Rug",
+    description: "Floor decoration. Furniture can sit on top of it.",
+    category: "furniture",
     color: "#7c2d12",
     defaultW: 3,
     defaultH: 2,
-    solid: false,
-    zone: false,
-    audioRoom: false,
     icon: "🟫",
   },
-  door: {
-    type: "door",
-    label: "Door",
-    color: "#a16207",
-    defaultW: 1,
-    defaultH: 1,
-    solid: false,
-    zone: false,
-    audioRoom: false,
-    icon: "🚪",
+  // ── Areas ────────────────────────────────────────────────────────────────
+  meeting: {
+    ...base,
+    type: "meeting",
+    label: "Meeting Room",
+    description: "Private audio. Everyone inside hears each other at full volume and nobody outside can listen in.",
+    category: "area",
+    color: "#1e40af",
+    defaultW: 5,
+    defaultH: 4,
+    zone: true,
+    audioRoom: true,
+    icon: "📋",
   },
-  spawn: {
-    type: "spawn",
-    label: "Spawn Point",
-    color: "#0891b2",
-    defaultW: 1,
-    defaultH: 1,
-    solid: false,
-    zone: false,
-    audioRoom: false,
-    icon: "📍",
+  booth: {
+    ...base,
+    type: "booth",
+    label: "Phone Booth",
+    description: "A tiny private room for 1:1s or calls. Works like a meeting room, sized for two.",
+    category: "area",
+    color: "#0f766e",
+    defaultW: 2,
+    defaultH: 2,
+    zone: true,
+    audioRoom: true,
+    icon: "📞",
   },
+  lounge: {
+    ...base,
+    type: "lounge",
+    label: "Lounge",
+    description: "A named open area. Shows up as people's location, but sound works normally.",
+    category: "area",
+    color: "#52525b",
+    defaultW: 4,
+    defaultH: 3,
+    zone: true,
+    icon: "🛋️",
+  },
+  // ── Utility ──────────────────────────────────────────────────────────────
   speaker: {
+    ...base,
     type: "speaker",
     label: "Speaker",
+    description: "Plays shared music to everyone in range. Walls and rooms block it like voices.",
+    category: "utility",
     color: "#6d28d9",
     defaultW: 1,
     defaultH: 1,
-    solid: false,
-    zone: false,
-    audioRoom: false,
     icon: "🔊",
+  },
+  spawn: {
+    ...base,
+    type: "spawn",
+    label: "Spawn Point",
+    description: "Where people appear when they join the office.",
+    category: "utility",
+    color: "#0891b2",
+    defaultW: 1,
+    defaultH: 1,
+    icon: "📍",
   },
 };
 
-export const PALETTE: ItemType[] = [
-  "wall",
-  "desk",
-  "chair",
-  "meeting",
-  "lounge",
-  "plant",
-  "rug",
-  "door",
-  "spawn",
-  "speaker",
+export const CATEGORIES: { id: ItemCategory; label: string; items: ItemType[] }[] = [
+  { id: "structure", label: "Structure", items: ["wall", "glass", "door"] },
+  {
+    id: "furniture",
+    label: "Furniture",
+    items: ["desk", "chair", "shelf", "whiteboard", "coffee", "plant", "rug"],
+  },
+  { id: "area", label: "Areas", items: ["meeting", "booth", "lounge"] },
+  { id: "utility", label: "Utility", items: ["speaker", "spawn"] },
 ];
+
+export const PALETTE: ItemType[] = CATEGORIES.flatMap((c) => c.items);
+
+export type EffectTone = "block" | "sound" | "private" | "open";
+
+/** Human-readable gameplay effects of an item, for the editor UI. */
+export function itemEffects(type: ItemType): { label: string; tone: EffectTone }[] {
+  const m = ITEM_META[type];
+  const out: { label: string; tone: EffectTone }[] = [];
+  if (m.audioRoom) out.push({ label: "Private audio", tone: "private" });
+  if (m.solid) out.push({ label: "Blocks movement", tone: "block" });
+  else if (!m.zone) out.push({ label: "Walkable", tone: "open" });
+  if (m.blocksSound) out.push({ label: "Blocks sound", tone: "sound" });
+  else if (m.solid) out.push({ label: "Sound passes", tone: "open" });
+  return out;
+}
 
 export function makeItem(type: ItemType, x: number, y: number): LayoutItem {
   const meta = ITEM_META[type];
@@ -326,6 +437,142 @@ export function randomLayout(): OfficeLayout {
   return { width, height, items };
 }
 
+/**
+ * A hand-designed 32×20 office that showcases every item:
+ *
+ *   ┌ Boardroom ─┬ Booth ┬ Booth ┬─────────────┬ Café ──────────┐
+ *   │ whiteboard │ glass │ glass │  open desks │ coffee · rug   │
+ *   ├────door────┴──door─┴──door─┘             │ speaker        │
+ *   │                                          └─glass─(open)───┤
+ *   │ plants          desk pods         plants                  │
+ *   ├ shelves ─┐                              ┌────── Huddle ───┤
+ *   │ Library  │          reception rug       door   table      │
+ *   └──────────┴───────────── door door ──────┴─────────────────┘
+ */
+export function officeTemplate(): OfficeLayout {
+  const width = 32;
+  const height = 20;
+  const items: LayoutItem[] = [];
+  const add = (type: ItemType, x: number, y: number, w = 1, h = 1, extra: Partial<LayoutItem> = {}) =>
+    items.push({ id: crypto.randomUUID(), type, x, y, w, h, ...extra });
+  /** A straight 1-tile-thick barrier line; `doors` are cells that become doors instead. */
+  const line = (
+    type: "wall" | "glass",
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    doors: [number, number][] = [],
+  ) => {
+    for (let x = x0; x <= x1; x++)
+      for (let y = y0; y <= y1; y++)
+        add(doors.some(([dx, dy]) => dx === x && dy === y) ? "door" : type, x, y);
+  };
+
+  // ── Outer shell, entrance at the bottom centre ──────────────────────────
+  line("wall", 0, 0, width - 1, 0);
+  line("wall", 0, height - 1, width - 1, height - 1, [
+    [15, height - 1],
+    [16, height - 1],
+  ]);
+  line("wall", 0, 1, 0, height - 2);
+  line("wall", width - 1, 1, width - 1, height - 2);
+
+  // ── Boardroom (top-left): private audio, whiteboard + long table ────────
+  line("wall", 9, 1, 9, 6);
+  line("wall", 1, 6, 8, 6, [[5, 6]]);
+  add("meeting", 1, 1, 8, 5, { label: "Boardroom" });
+  add("whiteboard", 4, 1, 3, 1);
+  add("desk", 4, 3, 3, 1);
+  for (const x of [4, 5, 6]) {
+    add("chair", x, 2);
+    add("chair", x, 4);
+  }
+  add("chair", 3, 3);
+  add("chair", 7, 3);
+  add("plant", 1, 5);
+  add("plant", 8, 1);
+
+  // ── Phone booths (glass-fronted, private audio) ─────────────────────────
+  line("glass", 13, 1, 13, 2);
+  line("wall", 17, 1, 17, 3);
+  line("glass", 10, 3, 16, 3, [
+    [11, 3],
+    [15, 3],
+  ]);
+  add("booth", 10, 1, 3, 2, { label: "Booth 1" });
+  add("booth", 14, 1, 3, 2, { label: "Booth 2" });
+  add("chair", 10, 2);
+  add("chair", 14, 2);
+
+  // ── Café (top-right): glass-walled, coffee bar, rug seating, speaker ────
+  line("glass", 21, 1, 21, 7, [[21, 4]]);
+  line("glass", 22, 7, 30, 7, [[26, 7]]);
+  add("lounge", 22, 1, 9, 6, { label: "Café" });
+  add("coffee", 26, 1, 4, 1);
+  add("rug", 24, 3, 5, 3);
+  for (const [x, y] of [
+    [24, 3],
+    [28, 3],
+    [24, 5],
+    [28, 5],
+  ])
+    add("chair", x, y);
+  add("desk", 26, 4, 1, 1);
+  add("plant", 30, 1);
+  add("plant", 22, 6);
+  add("speaker", 30, 5, 1, 1, { range: 6 });
+
+  // ── Open desk area (centre): six face-to-face pods ──────────────────────
+  for (const x of [11, 14, 17]) {
+    for (const top of [5, 10]) {
+      add("chair", x, top);
+      add("chair", x + 1, top);
+      add("desk", x, top + 1, 2, 1);
+      add("desk", x, top + 2, 2, 1);
+      add("chair", x, top + 3);
+      add("chair", x + 1, top + 3);
+    }
+  }
+  add("plant", 10, 7);
+  add("plant", 20, 7);
+  add("plant", 10, 12);
+  add("plant", 20, 12);
+
+  // ── Quiet library (bottom-left): shelves block noise from the floor ─────
+  add("shelf", 1, 12, 2, 1);
+  add("shelf", 3, 12, 2, 1);
+  add("shelf", 7, 12, 2, 1);
+  line("wall", 9, 12, 9, 18);
+  add("lounge", 1, 13, 8, 5, { label: "Quiet Library" });
+  add("desk", 2, 15, 2, 1);
+  add("desk", 5, 15, 3, 1);
+  for (const x of [2, 3, 5, 6, 7]) add("chair", x, 16);
+  add("plant", 8, 13);
+  add("shelf", 1, 18, 4, 1);
+  add("shelf", 5, 18, 4, 1);
+
+  // ── Huddle room (bottom-right) ──────────────────────────────────────────
+  line("wall", 23, 12, 30, 12);
+  line("wall", 23, 13, 23, 18, [[23, 15]]);
+  add("meeting", 24, 13, 7, 6, { label: "Huddle Room" });
+  add("desk", 26, 15, 3, 2);
+  for (const x of [26, 27, 28]) {
+    add("chair", x, 14);
+    add("chair", x, 17);
+  }
+  add("whiteboard", 30, 14, 1, 3);
+  add("plant", 24, 18);
+
+  // ── Reception (bottom centre): welcome rug, spawn, plants ───────────────
+  add("rug", 13, 15, 6, 3);
+  add("spawn", 15, 16);
+  add("plant", 11, 17);
+  add("plant", 20, 17);
+
+  return { width, height, items };
+}
+
 /** The pixel point where avatars should spawn (first spawn item, else center). */
 export function spawnPoint(layout: OfficeLayout): { x: number; y: number } {
   const spawn = layout.items.find((i) => i.type === "spawn");
@@ -338,35 +585,109 @@ export function spawnPoint(layout: OfficeLayout): { x: number; y: number } {
   return { x: (layout.width * CELL) / 2, y: (layout.height * CELL) / 2 };
 }
 
+type Box = { l: number; t: number; r: number; b: number };
+
+/** Collision half-thickness of walls/glass — matches how they're drawn. */
+const WALL_HALF = 7;
+/** How far (px) movement will auto-slide sideways to line you up with a gap. */
+const CORNER_ASSIST = 24;
+
 /**
- * Resolve a desired move against solid items using axis-separated AABB
- * collision, so avatars slide along walls instead of sticking.
+ * Collision boxes for every solid item. Walls and glass use their *drawn*
+ * shape — a thin post plus arms toward neighbouring barriers — rather than the
+ * whole 40px tile, so doorways are as wide as they look. Arms toward a door
+ * stop at the tile edge, leaving the full door tile open.
+ */
+let _boxCache: { layout: OfficeLayout; boxes: Box[] } | null = null;
+function collisionBoxes(layout: OfficeLayout): Box[] {
+  if (_boxCache?.layout === layout) return _boxCache.boxes;
+  const boxes: Box[] = [];
+  const barrier = new Map<string, ItemType>();
+  for (const it of layout.items) {
+    if (!ITEM_META[it.type].connects) continue;
+    for (let cx = it.x; cx < it.x + it.w; cx++)
+      for (let cy = it.y; cy < it.y + it.h; cy++) barrier.set(`${cx},${cy}`, it.type);
+  }
+  for (const it of layout.items) {
+    const meta = ITEM_META[it.type];
+    if (!meta.solid) continue;
+    if (!meta.connects) {
+      boxes.push({ l: it.x * CELL, t: it.y * CELL, r: (it.x + it.w) * CELL, b: (it.y + it.h) * CELL });
+      continue;
+    }
+    for (let cx = it.x; cx < it.x + it.w; cx++)
+      for (let cy = it.y; cy < it.y + it.h; cy++) {
+        const mx = (cx + 0.5) * CELL;
+        const my = (cy + 0.5) * CELL;
+        const h = WALL_HALF;
+        boxes.push({ l: mx - h, t: my - h, r: mx + h, b: my + h });
+        const linked = (dx: number, dy: number) => barrier.has(`${cx + dx},${cy + dy}`);
+        if (linked(-1, 0)) boxes.push({ l: cx * CELL, t: my - h, r: mx, b: my + h });
+        if (linked(1, 0)) boxes.push({ l: mx, t: my - h, r: (cx + 1) * CELL, b: my + h });
+        if (linked(0, -1)) boxes.push({ l: mx - h, t: cy * CELL, r: mx + h, b: my });
+        if (linked(0, 1)) boxes.push({ l: mx - h, t: my, r: mx + h, b: (cy + 1) * CELL });
+      }
+  }
+  _boxCache = { layout, boxes };
+  return boxes;
+}
+
+/**
+ * Resolve a desired move against solid items. Avatars are circles tested
+ * against boxes, axis-separated so they slide along walls. When a straight-on
+ * move is blocked by a corner (e.g. a door frame), the avatar is nudged
+ * sideways toward the nearest opening so doors don't need pixel precision.
  */
 export function resolveMove(
   layout: OfficeLayout,
   from: { x: number; y: number },
   to: { x: number; y: number },
 ): { x: number; y: number } {
-  const solids = layout.items.filter((i) => ITEM_META[i.type].solid);
+  const boxes = collisionBoxes(layout);
   const r = AVATAR_RADIUS;
   const maxX = layout.width * CELL;
   const maxY = layout.height * CELL;
 
   const hits = (px: number, py: number) =>
-    solids.some((s) => {
-      const left = s.x * CELL;
-      const top = s.y * CELL;
-      const right = (s.x + s.w) * CELL;
-      const bottom = (s.y + s.h) * CELL;
-      return px + r > left && px - r < right && py + r > top && py - r < bottom;
+    boxes.some((s) => {
+      const qx = Math.max(s.l, Math.min(px, s.r));
+      const qy = Math.max(s.t, Math.min(py, s.b));
+      return (px - qx) ** 2 + (py - qy) ** 2 < r * r;
     });
 
-  let nx = Math.max(r, Math.min(maxX - r, to.x));
-  let ny = Math.max(r, Math.min(maxY - r, to.y));
+  const tx = Math.max(r, Math.min(maxX - r, to.x));
+  const ty = Math.max(r, Math.min(maxY - r, to.y));
+  const dx = tx - from.x;
+  const dy = ty - from.y;
+  const speed = Math.max(Math.abs(dx), Math.abs(dy));
 
-  // Try X movement, then Y movement independently.
+  let nx = tx;
+  let ny = ty;
   if (hits(nx, from.y)) nx = from.x;
   if (hits(nx, ny)) ny = from.y;
+
+  // Corner assist: moving mostly along one axis but blocked → find the nearest
+  // sideways offset where the move would succeed and drift toward it.
+  const assist = (blockedAlong: "x" | "y") => {
+    for (let s = 1; s <= CORNER_ASSIST; s++) {
+      for (const sign of [1, -1]) {
+        const off = s * sign;
+        const ok =
+          blockedAlong === "x"
+            ? !hits(from.x, from.y + off) && !hits(tx, from.y + off)
+            : !hits(from.x + off, from.y) && !hits(from.x + off, ty);
+        if (ok) return Math.sign(off) * Math.min(s, speed);
+      }
+    }
+    return 0;
+  };
+  if (nx === from.x && Math.abs(dx) > 0 && Math.abs(dy) < Math.abs(dx) * 0.5) {
+    const shift = assist("x");
+    if (shift && !hits(from.x, from.y + shift)) ny = from.y + shift;
+  } else if (ny === from.y && Math.abs(dy) > 0 && Math.abs(dx) < Math.abs(dy) * 0.5) {
+    const shift = assist("y");
+    if (shift && !hits(from.x + shift, from.y)) nx = from.x + shift;
+  }
   return { x: nx, y: ny };
 }
 
@@ -536,13 +857,13 @@ export function findPath(
   return path;
 }
 
-/** True if a wall sits on the straight line between two points (sound occlusion). */
+/** True if a sound-blocking item (wall, shelf) sits between two points (sound occlusion). */
 export function wallBetween(
   layout: OfficeLayout,
   a: { x: number; y: number },
   b: { x: number; y: number },
 ): boolean {
-  const walls = layout.items.filter((i) => i.type === "wall");
+  const walls = layout.items.filter((i) => ITEM_META[i.type].blocksSound);
   if (walls.length === 0) return false;
   const wallCells = new Set<string>();
   for (const w of walls) {

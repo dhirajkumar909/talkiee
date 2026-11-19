@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowLeft, Save, Trash2, MousePointer2, Minus, Plus, Dices, Undo2, Redo2 } from 'lucide-react';
+import { ArrowLeft, Save, Trash2, MousePointer2, Minus, Plus, Dices, Undo2, Redo2, LayoutTemplate } from 'lucide-react';
 import { getOffice, saveOfficeLayout } from '../lib/api';
 import type { ItemType, LayoutItem, Office, OfficeLayout } from '../types';
 import {
@@ -13,9 +13,10 @@ import {
   MAX_SPEAKER_RANGE_TILES,
   MIN_HEARING_RANGE_TILES,
   MIN_SPEAKER_RANGE_TILES,
-  PALETTE,
+  CATEGORIES,
   footprintFree,
   makeItem,
+  officeTemplate,
   randomLayout,
   spawnPoint,
   voiceRanges,
@@ -26,6 +27,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { cn } from '../lib/utils';
+import { EffectChips, ItemIcon } from '../components/ItemVisuals';
 
 type Tool = ItemType | 'select';
 
@@ -53,6 +55,8 @@ export function OfficeEditor() {
     offY: number;
     origin: Map<string, { x: number; y: number }>;
   } | null>(null);
+  // Drag-painting walls/glass: the working layout and the last painted cell.
+  const paintRef = useRef<{ layout: OfficeLayout; last: { x: number; y: number } } | null>(null);
   // Marquee box-select: selection to union with (empty unless Shift was held).
   const marqueeBaseRef = useRef<Set<string>>(new Set());
 
@@ -252,14 +256,49 @@ export function OfficeEditor() {
       return;
     }
     const item = makeItem(tool, nx, ny);
-    commit({ ...layout, items: [...layout.items, item] });
+    const next = { ...layout, items: [...layout.items, item] };
+    if (meta.paintable) {
+      // Start a stroke: keep painting tiles as the mouse moves (one undo step).
+      beginLive();
+      liveSet(next);
+      paintRef.current = { layout: next, last: { x: nx, y: ny } };
+      setSelectedIds(new Set());
+      return;
+    }
+    commit(next);
     setSelectedIds(new Set([item.id]));
+  };
+
+  /** Paint 1×1 tiles along a 4-connected grid line, so painted walls always touch and join. */
+  const paintTo = (x: number, y: number) => {
+    const paint = paintRef.current;
+    if (!paint || tool === 'select') return;
+    let { x: cx, y: cy } = paint.last;
+    if (cx === x && cy === y) return;
+    let working = paint.layout;
+    let changed = false;
+    while (cx !== x || cy !== y) {
+      // Step along the axis with the larger remaining distance (no diagonal hops).
+      if (Math.abs(x - cx) >= Math.abs(y - cy)) cx += Math.sign(x - cx);
+      else cy += Math.sign(y - cy);
+      if (cx < 0 || cy < 0 || cx >= working.width || cy >= working.height) continue;
+      if (!footprintFree(working, cx, cy, 1, 1, tool)) continue;
+      working = { ...working, items: [...working.items, makeItem(tool, cx, cy)] };
+      changed = true;
+    }
+    paintRef.current = { layout: working, last: { x, y } };
+    if (changed) liveSet(working);
   };
 
   const onMouseMove = (e: React.MouseEvent) => {
     if (!layout) return;
     const { x, y } = cellFromEvent(e);
     setHover({ x, y });
+
+    if (paintRef.current) {
+      paintTo(x, y);
+      return;
+    }
 
     const drag = dragRef.current;
     if (drag) {
@@ -317,6 +356,10 @@ export function OfficeEditor() {
   };
 
   const onMouseUp = () => {
+    if (paintRef.current) {
+      paintRef.current = null;
+      return;
+    }
     if (dragRef.current) {
       dragRef.current = null;
       return;
@@ -446,6 +489,18 @@ export function OfficeEditor() {
             size="sm"
             variant="outline"
             onClick={() => {
+              commit(officeTemplate());
+              setSelectedIds(new Set());
+              toast.success('Template loaded. Undo (Ctrl/Cmd+Z) to go back.');
+            }}
+            title="Load a ready-made office that uses every item"
+          >
+            <LayoutTemplate /> Template
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
               commit(randomLayout());
               setSelectedIds(new Set());
             }}
@@ -464,36 +519,77 @@ export function OfficeEditor() {
 
       <div className="flex min-h-0 flex-1">
         {/* Palette */}
-        <aside className="w-52 shrink-0 overflow-y-auto border-r p-3">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tools</p>
-          <button
-            onClick={() => setTool('select')}
-            className={cn(
-              'mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm transition',
-              tool === 'select' ? 'border-primary bg-accent' : 'hover:bg-accent',
-            )}
-          >
-            <MousePointer2 className="size-4" /> Select / Move
-          </button>
+        <aside className="flex w-64 shrink-0 flex-col border-r">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 [scrollbar-width:thin]">
+            <button
+              onClick={() => setTool('select')}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-xl border px-2.5 py-2 text-left text-sm font-medium transition',
+                tool === 'select'
+                  ? 'border-primary/60 bg-accent ring-1 ring-primary/30'
+                  : 'border-transparent hover:bg-accent',
+              )}
+            >
+              <span className="grid size-8 place-items-center rounded-lg bg-muted">
+                <MousePointer2 className="size-4" />
+              </span>
+              Select &amp; move
+            </button>
 
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Furniture</p>
-          <div className="grid grid-cols-2 gap-2">
-            {PALETTE.map((t) => (
-              <button
-                key={t}
-                onClick={() => {
-                  setTool(t);
-                  setSelectedIds(new Set());
-                }}
-                className={cn(
-                  'flex flex-col items-center gap-1 rounded-lg border px-2 py-2.5 text-xs transition',
-                  tool === t ? 'border-primary bg-accent' : 'hover:bg-accent',
-                )}
-              >
-                <span className="text-lg">{ITEM_META[t].icon}</span>
-                {ITEM_META[t].label}
-              </button>
+            {CATEGORIES.map((cat) => (
+              <section key={cat.id}>
+                <h3 className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {cat.label}
+                </h3>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {cat.items.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => {
+                        setTool(t);
+                        setSelectedIds(new Set());
+                      }}
+                      title={ITEM_META[t].description}
+                      className={cn(
+                        'flex min-w-0 items-center gap-2 rounded-xl border p-1.5 pr-2 text-left text-xs font-medium transition',
+                        tool === t
+                          ? 'border-primary/60 bg-accent ring-1 ring-primary/30'
+                          : 'border-border/60 hover:border-border hover:bg-accent/60',
+                      )}
+                    >
+                      <ItemIcon type={t} className="size-7 rounded-md" />
+                      <span className="truncate leading-tight">{ITEM_META[t].label}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
             ))}
+          </div>
+
+          {/* What the active tool does */}
+          <div className="h-44 shrink-0 overflow-hidden border-t bg-muted/30 p-3">
+            {tool === 'select' ? (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                Click an item to select it, <b className="text-foreground">Shift-click</b> to add more, or drag a box on
+                empty floor. Drag a selection to move it.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2.5">
+                  <ItemIcon type={tool} />
+                  <p className="text-sm font-semibold">{ITEM_META[tool].label}</p>
+                </div>
+                <EffectChips type={tool} />
+                <p className="line-clamp-3 text-xs leading-relaxed text-muted-foreground">
+                  {ITEM_META[tool].description}
+                </p>
+                {ITEM_META[tool].paintable && (
+                  <p className="text-[11px] text-muted-foreground">
+                    <b className="text-foreground">Drag</b> to draw. Touching tiles join up.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </aside>
 
@@ -520,11 +616,15 @@ export function OfficeEditor() {
           <h2 className="mb-3 text-sm font-semibold">Properties</h2>
           {selected ? (
             <div className="space-y-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Type</p>
-                <p className="font-medium">
-                  {ITEM_META[selected.type].icon} {ITEM_META[selected.type].label}
+              <div className="space-y-2 rounded-xl border bg-muted/30 p-3">
+                <div className="flex items-center gap-2.5">
+                  <ItemIcon type={selected.type} />
+                  <p className="font-semibold">{ITEM_META[selected.type].label}</p>
+                </div>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {ITEM_META[selected.type].description}
                 </p>
+                <EffectChips type={selected.type} />
               </div>
               {ITEM_META[selected.type].zone && (
                 <div className="space-y-2">
@@ -577,9 +677,8 @@ export function OfficeEditor() {
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Pick furniture and click the floor to place it. With <b>Select / Move</b>: click an item to
-              select, <b>Shift-click</b> to add more, or <b>drag a box</b> on empty floor to select many —
-              then drag any of them to move the group.
+              Nothing selected. Pick something from the left and click the floor to place it, or use{' '}
+              <b>Select &amp; move</b> to edit what's already there.
             </p>
           )}
 
