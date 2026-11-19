@@ -5,13 +5,21 @@ import {
   ArrowLeft,
   Bell,
   BellOff,
+  ChevronDown,
+  Disc3,
   Headphones,
   HeadphoneOff,
   Footprints,
+  Info,
+  ListMusic,
   Mic,
   MicOff,
   Music,
   Pencil,
+  Play,
+  Radio,
+  Search,
+  SlidersHorizontal,
   Square,
   Users,
   Volume2,
@@ -59,6 +67,7 @@ import {
 import { Button } from '../components/ui/button';
 import { Avatar } from '../components/ui/avatar';
 import { Badge } from '../components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { Joystick } from '../components/Joystick';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { cn } from '../lib/utils';
@@ -133,6 +142,8 @@ export function OfficeRoom() {
   const [speakerVolumes, setSpeakerVolumes] = useState<Map<string, number>>(new Map());
   const [mutedPeers, setMutedPeers] = useState<Set<string>>(new Set());
   const [following, setFollowing] = useState<string | null>(null);
+  const [musicTab, setMusicTab] = useState<'radio' | 'search'>('radio');
+  const [showVolumes, setShowVolumes] = useState(false);
   const followingRef = useRef<string | null>(null);
   useEffect(() => {
     followingRef.current = following;
@@ -784,6 +795,7 @@ export function OfficeRoom() {
   const isOwner = office.owner_id === profile?.id;
   const connectedCount = roster.filter((r) => r.connected).length;
   const officeHasSpeaker = hasSpeaker(office.layout);
+  const speakers = office.layout.items.filter((it) => it.type === 'speaker');
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -905,242 +917,437 @@ export function OfficeRoom() {
 
         <aside
           className={cn(
-            'overflow-y-auto border-border bg-background p-4',
+            'flex-col overflow-hidden border-border bg-background',
             // Desktop: fixed side panel.
-            'hidden shrink-0 md:block md:w-72 md:border-l',
+            'hidden shrink-0 md:flex md:w-80 md:border-l',
             // Mobile: slide-up drawer, toggled by the People button.
             showRoster &&
-              'absolute inset-x-0 bottom-0 z-40 block max-h-[70%] rounded-t-2xl border-t shadow-2xl',
+              'absolute inset-x-0 bottom-0 z-40 flex max-h-[75%] rounded-t-2xl border-t shadow-2xl',
           )}
         >
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-sm font-semibold">In this office</h2>
-              <p className="mb-4 text-xs text-muted-foreground">
-                {roster.length} here · {connectedCount} in earshot
-              </p>
-            </div>
-            <button
-              onClick={() => setShowRoster(false)}
-              className="-mr-1 -mt-1 rounded-md p-1 text-muted-foreground hover:bg-accent md:hidden"
-              aria-label="Close"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-          {inRoom && (
-            <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
-              <p className="font-medium text-emerald-600 dark:text-emerald-400">🔇 In {inRoom}</p>
-              <p className="mt-0.5 text-muted-foreground">
-                Private room — you only hear others inside it, and they only hear you.
-              </p>
-            </div>
-          )}
-          {following && (
-            <div className="mb-4 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs">
-              <p className="flex min-w-0 items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                <Footprints className="size-4 shrink-0" />
-                <span className="truncate font-medium">
-                  Following {roster.find((r) => r.id === following)?.name ?? 'someone'}
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold leading-tight">In this office</h2>
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <span className="tabular-nums">{roster.length} here</span>
+                <span aria-hidden>·</span>
+                <span className="flex items-center gap-1 tabular-nums">
+                  <span className="size-1.5 rounded-full bg-emerald-500" />
+                  {connectedCount} in earshot
                 </span>
               </p>
-              <Button size="sm" variant="secondary" className="h-7 shrink-0 px-2" onClick={() => setFollowing(null)}>
-                Stop
-              </Button>
             </div>
-          )}
-          <ul className="space-y-1.5">
-            {roster.map((r) => {
-              const isSelf = r.id === profile?.id;
-              const peerMuted = mutedPeers.has(r.id);
-              return (
-                <li
-                  key={r.id}
-                  className={cn(
-                    'flex items-center gap-2 rounded-lg px-2 py-1.5',
-                    !isSelf && 'cursor-pointer hover:bg-accent',
-                  )}
-                  onClick={isSelf ? undefined : () => togglePeerMute(r.id)}
-                  title={isSelf ? undefined : peerMuted ? 'Unmute for yourself' : 'Mute for yourself'}
-                >
-                  <Avatar name={r.name} color={r.color} className="size-7" />
-                  <div className="min-w-0 flex-1">
-                    <p className={cn('truncate text-sm font-medium', peerMuted && 'text-muted-foreground line-through')}>
-                      {r.name}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">{r.zone}</p>
-                  </div>
-                  {following === r.id && !isSelf && (
-                    <Footprints className="size-4 shrink-0 text-amber-500" aria-label="Following" />
-                  )}
-                  {r.deafened ? (
-                    <HeadphoneOff className="size-4 shrink-0 text-muted-foreground" aria-label="Deafened themselves" />
-                  ) : r.muted ? (
-                    <MicOff className="size-4 shrink-0 text-muted-foreground" aria-label="Muted themselves" />
-                  ) : null}
-                  {!isSelf && peerMuted ? (
-                    <VolumeX className="size-4 shrink-0 text-destructive" />
-                  ) : r.connected ? (
-                    <Badge variant="success">🔊</Badge>
-                  ) : !isSelf ? (
-                    <Volume2 className="size-4 shrink-0 text-muted-foreground/40" />
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-          {mutedPeers.size > 0 && (
-            <button
-              onClick={() => setMutedPeers(new Set())}
-              className="mt-2 text-xs font-medium text-primary hover:underline"
-            >
-              Unmute {mutedPeers.size} muted {mutedPeers.size > 1 ? 'people' : 'person'}
-            </button>
-          )}
-
-          {/* Speaker music */}
-          <div className="mt-6 border-t pt-4">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <Music className="size-4" /> Speaker music
-            </h3>
-            {!officeHasSpeaker ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                No speaker placed yet. {isOwner ? 'Add a 🔊 Speaker in the editor' : 'Ask the owner to add a 🔊 Speaker'} —
-                then music plays louder as you walk toward it.
-              </p>
-            ) : (
-              <>
-                {music.playing ? (
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 p-2.5">
-                    <p className="min-w-0 truncate text-xs">
-                      <span className="font-medium text-violet-600 dark:text-violet-300">
-                        ♫ {nowPlaying || music.name}
-                      </span>
-                      <span className="text-muted-foreground"> · {music.by === profile?.id ? 'you' : 'playing'}</span>
-                    </p>
-                    <Button size="sm" variant="secondary" className="h-7 shrink-0 px-2" onClick={stopMusic}>
-                      <Square className="size-3.5" /> Stop
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Type a song name, or pick a station — everyone in earshot of a speaker hears it.
-                  </p>
-                )}
-
-                <div className="mt-3 grid grid-cols-2 gap-1.5">
-                  {STATIONS.map((s) => {
-                    const active = music.playing && music.src === s.url;
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => changeMusic('stream', s.url, s.name)}
-                        className={cn(
-                          'flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-xs transition',
-                          active ? 'border-violet-500 bg-violet-500/10' : 'hover:bg-accent',
-                        )}
-                      >
-                        <span className="text-base leading-none">{s.icon}</span>
-                        <span className="truncate">{s.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <form
-                  className="mt-2 flex gap-1.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void playCustom();
-                  }}
-                >
-                  <input
-                    value={customUrl}
-                    onChange={(e) => setCustomUrl(e.target.value)}
-                    placeholder="Song name, YouTube link, or stream URL…"
-                    className="h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-xs outline-none focus:border-primary"
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 px-2 text-xs"
-                    disabled={searching || !customUrl.trim()}
+            <div className="flex shrink-0 items-center gap-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                    aria-label="How it works"
+                    title="How it works"
                   >
-                    {searching ? '…' : 'Play'}
-                  </Button>
-                </form>
-                {deafened && music.playing && (
-                  <p className="mt-2 text-xs text-muted-foreground">Un-deafen to hear the music.</p>
-                )}
-
-                {/* Per-speaker volume, local to you */}
-                <div className="mt-4 space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Speaker volume (just for you)</p>
-                  {office.layout.items
-                    .filter((it) => it.type === 'speaker')
-                    .map((sp, i) => {
-                      const spMuted = mutedSpeakers.has(sp.id);
-                      const vol = spMuted ? 0 : Math.round((speakerVolumes.get(sp.id) ?? 1) * 100);
-                      return (
-                        <div key={sp.id} className="flex items-center gap-2">
-                          <button
-                            onClick={() => toggleSpeakerMute(sp.id)}
-                            title={spMuted ? 'Unmute for yourself' : 'Mute for yourself'}
-                            className="shrink-0 text-muted-foreground hover:text-foreground"
-                          >
-                            {spMuted ? (
-                              <VolumeX className="size-4 text-destructive" />
-                            ) : (
-                              <Volume2 className="size-4" />
-                            )}
-                          </button>
-                          <span className="w-16 shrink-0 text-xs">🔊 Speaker {i + 1}</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={vol}
-                            onChange={(e) => {
-                              const v = Number(e.target.value) / 100;
-                              // Dragging the slider off 0 also un-mutes it.
-                              if (spMuted && v > 0) toggleSpeakerMute(sp.id);
-                              setSpeakerVolume(sp.id, v);
-                            }}
-                            className="h-1 flex-1 cursor-pointer accent-violet-500"
-                          />
-                          <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                            {vol}%
-                          </span>
-                        </div>
-                      );
-                    })}
-                  <p className="text-xs text-muted-foreground">
-                    Or tap a 🔊 speaker on the floor to mute it.
-                  </p>
-                </div>
-              </>
-            )}
+                    <Info className="size-[18px]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72 p-0">
+                  <div className="border-b px-4 py-3">
+                    <p className="text-sm font-semibold">How it works</p>
+                  </div>
+                  <ul className="space-y-2.5 px-4 py-3 text-sm text-muted-foreground">
+                    <li className="flex gap-2.5">
+                      <Footprints className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>
+                        <span className="md:hidden">Drag the joystick to move.</span>
+                        <span className="hidden md:inline">
+                          Move with <Kbd>WASD</Kbd> or the arrow keys.
+                        </span>
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <Mic className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>Walk up to someone to talk — voice fades with distance.</span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <Users className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>Tap an avatar to follow them. Tap a name in the list to mute them for yourself.</span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <Music className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>Music gets louder near a 🔊 speaker. Tap a speaker on the floor to mute it.</span>
+                    </li>
+                  </ul>
+                  <div className="hidden border-t px-4 py-3 md:block">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Shortcuts
+                    </p>
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1.5 text-sm">
+                      <Kbd>M</Kbd>
+                      <span className="text-muted-foreground">Mute / unmute mic</span>
+                      <Kbd>⇧ M</Kbd>
+                      <span className="text-muted-foreground">Deafen</span>
+                    </div>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button
+                onClick={() => setShowRoster(false)}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent md:hidden"
+                aria-label="Close"
+              >
+                <X className="size-[18px]" />
+              </button>
+            </div>
           </div>
 
-          <p className="mt-6 text-xs text-muted-foreground">
-            <span className="md:hidden">Drag the joystick to move. </span>
-            <span className="hidden md:inline">
-              Move with <kbd className="rounded border px-1">WASD</kbd> or arrow keys.{' '}
-            </span>
-            Walk up to someone to talk. Tap their avatar to follow them.
-          </p>
-          <p className="mt-2 hidden text-xs text-muted-foreground md:block">
-            <kbd className="rounded border px-1">M</kbd> mute ·{' '}
-            <kbd className="rounded border px-1">⇧M</kbd> deafen
-          </p>
-          {!micOk && (
-            <p className="mt-3 text-xs text-destructive">
-              Mic unavailable — you can move and see others, but can't be heard.
-            </p>
-          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Status banners */}
+            {(!micOk || inRoom || following) && (
+              <div className="space-y-2 px-5 pt-4">
+                {!micOk && (
+                  <div className="flex gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm">
+                    <MicOff className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    <p className="text-destructive">Mic unavailable — others can't hear you.</p>
+                  </div>
+                )}
+                {inRoom && (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+                    <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">🔇 In {inRoom}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      Private room — only people inside can hear each other.
+                    </p>
+                  </div>
+                )}
+                {following && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 py-2 pl-3 pr-2">
+                    <p className="flex min-w-0 items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                      <Footprints className="size-4 shrink-0" />
+                      <span className="truncate font-medium">
+                        Following {roster.find((r) => r.id === following)?.name ?? 'someone'}
+                      </span>
+                    </p>
+                    <Button size="sm" variant="secondary" className="h-7 shrink-0 px-2.5" onClick={() => setFollowing(null)}>
+                      Stop
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* People */}
+            <section className="px-5 py-4">
+              <div className="mb-2 flex items-center justify-between">
+                <SectionLabel>People</SectionLabel>
+                {mutedPeers.size > 0 && (
+                  <button
+                    onClick={() => setMutedPeers(new Set())}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Unmute {mutedPeers.size}
+                  </button>
+                )}
+              </div>
+              {/* Capped height so a big roster never pushes the music section out of view. */}
+              <ul className="-mx-2 max-h-[min(20rem,35vh)] space-y-0.5 overflow-y-auto overscroll-contain">
+
+                {roster.map((r) => {
+                  const isSelf = r.id === profile?.id;
+                  const peerMuted = mutedPeers.has(r.id);
+                  return (
+                    <li
+                      key={r.id}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-2 py-2',
+                        !isSelf && 'cursor-pointer transition hover:bg-accent',
+                      )}
+                      onClick={isSelf ? undefined : () => togglePeerMute(r.id)}
+                      title={isSelf ? undefined : peerMuted ? 'Unmute for yourself' : 'Mute for yourself'}
+                    >
+                      <Avatar name={r.name} color={r.color} className="size-8" />
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={cn(
+                            'truncate text-sm font-medium leading-tight',
+                            peerMuted && 'text-muted-foreground line-through',
+                          )}
+                        >
+                          {r.name}
+                          {isSelf && <span className="ml-1 font-normal text-muted-foreground">(you)</span>}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{r.zone}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+                        {following === r.id && !isSelf && (
+                          <Footprints className="size-4 text-amber-500" aria-label="Following" />
+                        )}
+                        {r.deafened ? (
+                          <HeadphoneOff className="size-4" aria-label="Deafened themselves" />
+                        ) : r.muted ? (
+                          <MicOff className="size-4" aria-label="Muted themselves" />
+                        ) : null}
+                        {!isSelf && peerMuted ? (
+                          <VolumeX className="size-4 text-destructive" aria-label="Muted for you" />
+                        ) : r.connected ? (
+                          <Badge variant="success" className="px-2">
+                            <Volume2 className="size-3.5" />
+                          </Badge>
+                        ) : !isSelf ? (
+                          <Volume2 className="size-4 opacity-30" aria-label="Out of earshot" />
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+
+            {/* Speaker music */}
+            <section className="border-t px-5 py-4">
+              <div className="mb-3 flex items-center gap-2">
+                <Music className="size-4 text-muted-foreground" />
+                <SectionLabel>Speaker music</SectionLabel>
+              </div>
+              {!officeHasSpeaker ? (
+                <p className="rounded-lg border border-dashed px-3 py-3 text-sm leading-relaxed text-muted-foreground">
+                  No speaker yet. {isOwner ? 'Add a 🔊 Speaker in the editor' : 'Ask the owner to add a 🔊 Speaker'} to
+                  play music.
+                </p>
+              ) : (
+                <div className="overflow-hidden rounded-xl border">
+                  {/* Now playing */}
+                  <div
+                    className={cn(
+                      'flex items-center gap-3 p-3',
+                      music.playing && 'bg-gradient-to-br from-violet-500/15 to-fuchsia-500/5',
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'flex size-10 shrink-0 items-center justify-center rounded-lg',
+                        music.playing ? 'bg-violet-500 text-white' : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {!music.playing ? (
+                        <Music className="size-5" />
+                      ) : music.kind === 'stream' ? (
+                        <Radio className="size-5" />
+                      ) : music.kind === 'youtube_playlist' ? (
+                        <ListMusic className="size-5" />
+                      ) : (
+                        <Disc3 className="size-5 animate-[spin_3s_linear_infinite]" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      {music.playing ? (
+                        <>
+                          <p className="truncate text-sm font-semibold">{nowPlaying || music.name}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {deafened
+                              ? 'Un-deafen to hear it'
+                              : `${music.kind === 'stream' ? 'Radio' : music.kind === 'youtube_playlist' ? 'Playlist' : 'YouTube'} · ${
+                                  music.by === profile?.id ? 'started by you' : 'shared with everyone'
+                                }`}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-medium">Nothing playing</p>
+                          <p className="text-xs text-muted-foreground">Pick a station or search a song</p>
+                        </>
+                      )}
+                    </div>
+                    {music.playing && (
+                      <button
+                        onClick={stopMusic}
+                        title="Stop for everyone"
+                        aria-label="Stop music"
+                        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition hover:opacity-80"
+                      >
+                        <Square className="size-3.5 fill-current" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Source tabs */}
+                  <div className="border-t p-3">
+                    <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="tablist">
+                      {(
+                        [
+                          ['radio', Radio, 'Radio'],
+                          ['search', Search, 'Search'],
+                        ] as const
+                      ).map(([key, Icon, label]) => (
+                        <button
+                          key={key}
+                          role="tab"
+                          aria-selected={musicTab === key}
+                          onClick={() => setMusicTab(key)}
+                          className={cn(
+                            'flex h-8 items-center justify-center gap-1.5 rounded-md text-sm font-medium transition',
+                            musicTab === key
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground',
+                          )}
+                        >
+                          <Icon className="size-4" /> {label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {musicTab === 'radio' ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {STATIONS.map((s) => {
+                          const active = music.playing && music.src === s.url;
+                          return (
+                            <button
+                              key={s.id}
+                              onClick={() => (active ? stopMusic() : changeMusic('stream', s.url, s.name))}
+                              title={active ? 'Stop' : `Play ${s.name}`}
+                              className={cn(
+                                'flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition',
+                                active
+                                  ? 'border-violet-500 bg-violet-500/10 ring-1 ring-violet-500'
+                                  : 'hover:border-foreground/20 hover:bg-accent',
+                              )}
+                            >
+                              <span className="flex w-full items-center justify-between">
+                                <span className="text-xl leading-none">{s.icon}</span>
+                                {active && <EqBars />}
+                              </span>
+                              <span
+                                className={cn(
+                                  'w-full truncate text-xs font-medium',
+                                  active && 'text-violet-700 dark:text-violet-300',
+                                )}
+                              >
+                                {s.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void playCustom();
+                        }}
+                      >
+                        <div className="relative">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                          <input
+                            autoFocus
+                            value={customUrl}
+                            onChange={(e) => setCustomUrl(e.target.value)}
+                            placeholder="Song name or YouTube link"
+                            className="h-10 w-full rounded-lg border bg-transparent pl-9 pr-3 text-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                          />
+                        </div>
+                        <Button type="submit" className="mt-2 h-9 w-full" disabled={searching || !customUrl.trim()}>
+                          {searching ? (
+                            'Searching…'
+                          ) : (
+                            <>
+                              <Play className="size-4 fill-current" /> Play for everyone
+                            </>
+                          )}
+                        </Button>
+                        <p className="mt-2 text-center text-xs text-muted-foreground">
+                          Works with videos and playlists
+                        </p>
+                      </form>
+                    )}
+                  </div>
+
+                  {/* Personal volume (collapsible) */}
+                  <div className="border-t">
+                    <button
+                      onClick={() => setShowVolumes((v) => !v)}
+                      aria-expanded={showVolumes}
+                      className="flex w-full items-center justify-between px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                    >
+                      <span className="flex items-center gap-2">
+                        <SlidersHorizontal className="size-4" />
+                        My volume
+                        {mutedSpeakers.size > 0 && (
+                          <span className="rounded-full bg-destructive/15 px-1.5 text-xs font-medium text-destructive">
+                            {mutedSpeakers.size} muted
+                          </span>
+                        )}
+                      </span>
+                      <ChevronDown className={cn('size-4 transition-transform', showVolumes && 'rotate-180')} />
+                    </button>
+                    {showVolumes && (
+                      <div className="space-y-2.5 px-3 pb-3">
+                        {speakers.map((sp, i) => {
+                          const spMuted = mutedSpeakers.has(sp.id);
+                          const vol = spMuted ? 0 : Math.round((speakerVolumes.get(sp.id) ?? 1) * 100);
+                          return (
+                            <div key={sp.id} className="flex items-center gap-2.5">
+                              <button
+                                onClick={() => toggleSpeakerMute(sp.id)}
+                                title={spMuted ? 'Unmute for yourself' : 'Mute for yourself'}
+                                className="shrink-0 rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                              >
+                                {spMuted ? <VolumeX className="size-4 text-destructive" /> : <Volume2 className="size-4" />}
+                              </button>
+                              {speakers.length > 1 && <span className="w-6 shrink-0 text-xs text-muted-foreground">#{i + 1}</span>}
+                              <input
+                                type="range"
+                                min={0}
+                                max={100}
+                                value={vol}
+                                aria-label={`Speaker ${i + 1} volume`}
+                                onChange={(e) => {
+                                  const v = Number(e.target.value) / 100;
+                                  // Dragging the slider off 0 also un-mutes it.
+                                  if (spMuted && v > 0) toggleSpeakerMute(sp.id);
+                                  setSpeakerVolume(sp.id, v);
+                                }}
+                                className="h-1 min-w-0 flex-1 cursor-pointer accent-violet-500"
+                              />
+                              <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                {vol}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                        <p className="text-xs text-muted-foreground">Only affects what you hear.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
         </aside>
       </div>
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>;
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1.5 font-mono text-[11px] font-medium text-foreground">
+      {children}
+    </kbd>
+  );
+}
+
+/** Tiny animated equalizer shown on the active station. */
+function EqBars() {
+  return (
+    <span className="flex h-3.5 items-end gap-[2px]" aria-label="Playing">
+      {[0, 0.2, 0.4].map((d) => (
+        <span
+          key={d}
+          className="h-full w-[3px] origin-bottom animate-eq rounded-full bg-violet-500"
+          style={{ animationDelay: `${d}s` }}
+        />
+      ))}
+    </span>
   );
 }
