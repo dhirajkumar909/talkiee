@@ -155,6 +155,8 @@ export function drawSpeakerPulses(
   layout: OfficeLayout,
   timeMs: number,
   muted?: Set<string>,
+  /** Only these speakers pulse; omit to pulse all. */
+  playing?: Set<string>,
 ) {
   const speakers = layout.items.filter((i) => i.type === 'speaker');
   if (speakers.length === 0) return;
@@ -166,6 +168,7 @@ export function drawSpeakerPulses(
       drawMutedMarker(ctx, cx, cy);
       continue;
     }
+    if (playing && !playing.has(s.id)) continue;
     for (let k = 0; k < 3; k++) {
       // Each ring expands over ~1.6s then resets; staggered by k.
       const phase = ((timeMs / 1600 + k / 3) % 1 + 1) % 1;

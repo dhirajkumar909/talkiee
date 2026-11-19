@@ -34,8 +34,8 @@ connects by proximity and fades with distance, like a real room.
   dashboard.
 
 > Local listening preferences (per-person mutes, per-speaker mutes, follow) are
-> yours alone — they aren't broadcast. The playing track persists per office, so
-> a refresh resumes the music rather than stopping it.
+> yours alone — they aren't broadcast. Each speaker's track persists per office,
+> so a refresh resumes the music rather than stopping it.
 
 ## Stack
 
@@ -99,13 +99,16 @@ one unless you're a verified member of that office.
 
 ## Music (speakers)
 
-Add one or more **Speaker** items in the editor, then in the room's right panel
-pick a station, type a song name, or paste a **YouTube video / playlist** link.
-Playback is shared: whoever presses play broadcasts the track over the office's
-realtime channel, and every client plays it locally at a volume scaled by
-proximity to the nearest (non-muted) speaker — walls and meeting-room isolation
-apply just like voice. Each speaker's reach is set by its own range in the
-editor.
+Add one or more **Speaker** items in the editor. **Each speaker is its own
+channel**: walk into a speaker's range and a spinning disc appears in the
+bottom-right corner — tap it to open that speaker's controls and pick a station,
+type a song name, or paste a **YouTube video / playlist** link. If you're in
+range of several speakers, choose which one to control from the popup header.
+Playback is shared: whoever presses play broadcasts the track (tagged with the
+speaker's id) over the office's realtime channel, and every client plays each
+speaker locally at a volume scaled by proximity to *that* speaker — walls and
+meeting-room isolation apply just like voice. Each speaker's reach is set by its
+own range in the editor.
 
 - **Radio stations** stream directly from SomaFM (live, so everyone stays in
   sync). **YouTube** videos seek late-joiners to the live position; playlists

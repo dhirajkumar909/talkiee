@@ -5,13 +5,20 @@ import {
   ArrowLeft,
   Bell,
   BellOff,
+  ChevronDown,
+  Disc3,
   Headphones,
   HeadphoneOff,
   Footprints,
+  Info,
+  ListMusic,
   Mic,
   MicOff,
   Music,
   Pencil,
+  Play,
+  Radio,
+  Search,
   Square,
   Users,
   Volume2,
@@ -37,7 +44,6 @@ import {
   drawFloor,
   drawAvatars,
   drawSpeakerPulses,
-  drawMutedSpeakers,
   highlightRoom,
 } from '../office/render';
 import {
@@ -46,19 +52,20 @@ import {
   MOVE_SPEED_PX,
   audioDistance,
   findPath,
-  hasSpeaker,
   lineBlockedBySolids,
   resolveMove,
   roomAt,
   spawnPoint,
   speakerAt,
-  speakerVolumeAt,
+  speakerDistance,
+  speakerProximity,
   voiceRanges,
   zoneLabelAt,
 } from '../office/layout';
 import { Button } from '../components/ui/button';
 import { Avatar } from '../components/ui/avatar';
 import { Badge } from '../components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { Joystick } from '../components/Joystick';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { cn } from '../lib/utils';
@@ -75,22 +82,31 @@ const FOLLOW_MAX_SPEED = MOVE_SPEED_PX * 5.75;
 /** Beyond this gap (px), snap straight to the target rather than crawl after it. */
 const FOLLOW_SNAP_DIST = CELL * 14;
 
-const musicKey = (officeId: string) => `talkiee:music:${officeId}`;
+/** Music per speaker, keyed by speaker item id. */
+type SpeakerMusic = Record<string, MusicState>;
 
-function saveMusic(officeId: string, state: MusicState) {
+/**
+ * Two playing speakers whose distances differ by less than this (px) count as
+ * "equally close": one is picked at random and kept until that changes.
+ */
+const SPEAKER_TIE_DIST = CELL;
+
+const musicKey = (officeId: string) => `talkiee:music:v2:${officeId}`;
+
+function saveMusic(officeId: string, all: SpeakerMusic) {
   try {
-    localStorage.setItem(musicKey(officeId), JSON.stringify(state));
+    localStorage.setItem(musicKey(officeId), JSON.stringify(all));
   } catch {
     /* storage unavailable (private mode / quota) — non-fatal */
   }
 }
 
-function loadSavedMusic(officeId: string): MusicState | null {
+function loadSavedMusic(officeId: string): SpeakerMusic {
   try {
     const raw = localStorage.getItem(musicKey(officeId));
-    return raw ? (JSON.parse(raw) as MusicState) : null;
+    return raw ? (JSON.parse(raw) as SpeakerMusic) : {};
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -118,21 +134,23 @@ export function OfficeRoom() {
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [deafened, setDeafened] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
-  const [music, setMusic] = useState<MusicState>({
-    playing: false,
-    kind: 'stream',
-    src: '',
-    name: '',
-    by: '',
-    startedAt: 0,
-  });
-  const [nowPlaying, setNowPlaying] = useState('');
+  const [musicBySpeaker, setMusicBySpeaker] = useState<SpeakerMusic>({});
+  /** YouTube titles resolved locally, per speaker. */
+  const [titles, setTitles] = useState<Record<string, string>>({});
+  /** Speakers you're within earshot of, loudest first. */
+  const [inRange, setInRange] = useState<string[]>([]);
+  /** Which in-range speaker the music popup controls (null = loudest). */
+  const [pickedSpeaker, setPickedSpeaker] = useState<string | null>(null);
+  /** The single speaker you actually hear (closest playing one in range). */
+  const [audibleSpeaker, setAudibleSpeaker] = useState<string | null>(null);
+  const [showMusic, setShowMusic] = useState(false);
   const [customUrl, setCustomUrl] = useState('');
   const [searching, setSearching] = useState(false);
   const [mutedSpeakers, setMutedSpeakers] = useState<Set<string>>(new Set());
   const [speakerVolumes, setSpeakerVolumes] = useState<Map<string, number>>(new Map());
   const [mutedPeers, setMutedPeers] = useState<Set<string>>(new Set());
   const [following, setFollowing] = useState<string | null>(null);
+  const [musicTab, setMusicTab] = useState<'radio' | 'search'>('radio');
   const followingRef = useRef<string | null>(null);
   useEffect(() => {
     followingRef.current = following;
@@ -147,17 +165,26 @@ export function OfficeRoom() {
   const touchDirRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
   const channelRef = useRef<OfficeChannel | null>(null);
   const voiceRef = useRef<LiveKitVoice | null>(null);
-  const musicRef = useRef<SpeakerAudio | null>(null);
+  /** One audio player per speaker, created lazily the first time it plays. */
+  const musicPlayersRef = useRef<Map<string, SpeakerAudio>>(new Map());
+  const musicBySpeakerRef = useRef<SpeakerMusic>({});
+  const audibleSpeakerRef = useRef<string | null>(null);
   const connectedRef = useRef<Set<string>>(new Set());
   const officeRef = useRef<Office | null>(null);
   const lastEmit = useRef(0);
   const lastFrame = useRef(0);
   const micOkRef = useRef(false);
   const deafenedRef = useRef(false);
-  const musicPlayingRef = useRef(false);
+  /** Speakers currently playing (read by the render loop for pulses). */
+  const playingSpeakersRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    musicPlayingRef.current = music.playing;
-  }, [music.playing]);
+    musicBySpeakerRef.current = musicBySpeaker;
+    playingSpeakersRef.current = new Set(
+      Object.values(musicBySpeaker)
+        .filter((m) => m.playing)
+        .map((m) => m.speakerId),
+    );
+  }, [musicBySpeaker]);
   // Per-user, per-speaker local mutes (read by the render + proximity loops).
   const mutedSpeakersRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -167,9 +194,9 @@ export function OfficeRoom() {
   useEffect(() => {
     speakerVolumesRef.current = speakerVolumes;
   }, [speakerVolumes]);
-  // True once a peer has told us what's playing — suppresses the localStorage
+  // Speakers a peer has told us about — suppresses the localStorage
   // restore so we don't revive a song others have already moved on from.
-  const musicReceivedRef = useRef(false);
+  const musicReceivedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     micOkRef.current = micOk;
   }, [micOk]);
@@ -295,10 +322,6 @@ export function OfficeRoom() {
     voice.setRanges(vr.hearing, vr.full);
     voiceRef.current = voice;
 
-    const musicPlayer = new SpeakerAudio();
-    musicPlayer.onBlocked = (blocked) => blocked && setAudioBlocked(true);
-    musicPlayer.onTitle = (title) => setNowPlaying(title);
-    musicRef.current = musicPlayer;
 
     // Fetch a LiveKit token from the Edge Function, connect to the SFU, publish mic.
     (async () => {
@@ -359,11 +382,8 @@ export function OfficeRoom() {
       // WebRTC signaling is handled by LiveKit now; this stays a no-op.
       onSignal: () => {},
       onMusic: (state) => {
-        musicReceivedRef.current = true;
-        setMusic(state);
-        setNowPlaying(state.playing ? state.name : '');
-        musicRef.current?.play(state);
-        saveMusic(id, state);
+        musicReceivedRef.current.add(state.speakerId);
+        applyMusic(state);
       },
       onStatus: ({ userId, muted: m, deafened: d }) => {
         const p = playersRef.current.get(userId);
@@ -374,19 +394,18 @@ export function OfficeRoom() {
       },
     });
     channelRef.current = channel;
-    musicReceivedRef.current = false;
+    musicReceivedRef.current = new Set();
     void channel.join();
 
-    // Resume music after a refresh. Give peers a moment to re-broadcast the
-    // current song; if none does (e.g. you're alone), restore the last-known
-    // state we persisted locally so it doesn't just stop.
+    // Resume music after a refresh. Give peers a moment to re-broadcast what
+    // each speaker is playing; for any speaker nobody reported (e.g. you're
+    // alone), restore the last-known state we persisted locally.
     const restoreTimer = window.setTimeout(() => {
-      if (musicReceivedRef.current) return;
-      const saved = loadSavedMusic(id);
-      if (saved?.playing && saved.src) {
-        setMusic(saved);
-        setNowPlaying(saved.name);
-        musicRef.current?.play(saved);
+      const speakerIds = new Set(office.layout.items.filter((it) => it.type === 'speaker').map((it) => it.id));
+      for (const saved of Object.values(loadSavedMusic(id))) {
+        if (!saved?.playing || !saved.src || !speakerIds.has(saved.speakerId)) continue;
+        if (musicReceivedRef.current.has(saved.speakerId)) continue;
+        applyMusic(saved);
         channelRef.current?.sendMusic(saved);
       }
     }, 1500);
@@ -395,10 +414,10 @@ export function OfficeRoom() {
       window.clearTimeout(restoreTimer);
       void channel.leave();
       void voice.destroy();
-      musicPlayer.destroy();
+      for (const player of musicPlayersRef.current.values()) player.destroy();
+      musicPlayersRef.current.clear();
       channelRef.current = null;
       voiceRef.current = null;
-      musicRef.current = null;
       playersRef.current.clear();
       connectedRef.current.clear();
       namesRef.current.clear();
@@ -413,7 +432,7 @@ export function OfficeRoom() {
 
   useEffect(() => {
     voiceRef.current?.setDeafened(deafened);
-    musicRef.current?.setDeafened(deafened);
+    for (const player of musicPlayersRef.current.values()) player.setDeafened(deafened);
   }, [deafened]);
 
   useEffect(() => {
@@ -441,12 +460,50 @@ export function OfficeRoom() {
     });
   }, []);
 
-  // Change the shared speaker music: play locally + broadcast to the office.
+  // Wire up a speaker's player on first use (each speaker has its own channel).
+  function playerFor(speakerId: string): SpeakerAudio {
+    let player = musicPlayersRef.current.get(speakerId);
+    if (!player) {
+      player = new SpeakerAudio();
+      player.onBlocked = (blocked) => blocked && setAudioBlocked(true);
+      player.onTitle = (title) => setTitles((t) => ({ ...t, [speakerId]: title }));
+      player.setDeafened(deafenedRef.current);
+      musicPlayersRef.current.set(speakerId, player);
+    }
+    return player;
+  }
+
+  // Apply one speaker's state locally (from us or a peer) and persist it.
+  function applyMusic(state: MusicState) {
+    const next = { ...musicBySpeakerRef.current, [state.speakerId]: state };
+    musicBySpeakerRef.current = next;
+    setMusicBySpeaker(next);
+    setTitles((t) => ({ ...t, [state.speakerId]: state.playing ? state.name : '' }));
+    // Only the speaker you're hearing actually plays; the proximity loop picks
+    // (and starts) the right one. Re-apply here if it's the one you hear.
+    if (state.speakerId === audibleSpeakerRef.current) {
+      if (state.playing) playerFor(state.speakerId).play(state);
+      else {
+        musicPlayersRef.current.get(state.speakerId)?.stop();
+        audibleSpeakerRef.current = null; // let the loop fall back to the next-closest
+        setAudibleSpeaker(null);
+      }
+    }
+    if (id) saveMusic(id, next);
+  }
+
+  const resumeAllAudio = () => {
+    void voiceRef.current?.resumeAudio();
+    for (const player of musicPlayersRef.current.values()) player.resume();
+  };
+
+  // Change one speaker's music: play locally + broadcast to the office.
   const changeMusic = useCallback(
-    (kind: MusicState['kind'], src: string, name: string) => {
+    (speakerId: string, kind: MusicState['kind'], src: string, name: string) => {
       if (!profile) return;
       void voiceRef.current?.resumeAudio();
       const state: MusicState = {
+        speakerId,
         playing: Boolean(src),
         kind,
         src,
@@ -454,36 +511,61 @@ export function OfficeRoom() {
         by: profile.id,
         startedAt: Date.now(),
       };
-      setMusic(state);
-      setNowPlaying(src ? name : '');
-      musicRef.current?.play(state);
+      applyMusic(state);
       channelRef.current?.sendMusic(state);
-      saveMusic(id!, state);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [profile, id],
   );
+
+  // The speaker the music popup controls: your pick if still in range, else the loudest.
+  const activeSpeakerId =
+    pickedSpeaker && inRange.includes(pickedSpeaker)
+      ? pickedSpeaker
+      : audibleSpeaker && inRange.includes(audibleSpeaker)
+      ? audibleSpeaker
+      : inRange[0] ?? null;
+
+  const speakerName = (speakerId: string) => {
+    const list = officeRef.current?.layout.items.filter((it) => it.type === 'speaker') ?? [];
+    const idx = list.findIndex((it) => it.id === speakerId);
+    return list[idx]?.label || `Speaker ${idx + 1}`;
+  };
+
+  useEffect(() => {
+    if (!showMusic) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setShowMusic(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showMusic]);
+
+  // Leaving every speaker's range closes the popup.
+  useEffect(() => {
+    if (inRange.length === 0) setShowMusic(false);
+  }, [inRange.length]);
 
   // The box accepts a YouTube link/id, a direct audio stream URL, or — anything
   // else — a song name, which we resolve to the top YouTube match and play.
   const playCustom = useCallback(async () => {
     const input = customUrl.trim();
-    if (!input || searching) return;
+    const speakerId = activeSpeakerId;
+    if (!input || searching || !speakerId) return;
 
     // A playlist link (…?list=…) wins over a single-video id on the same URL.
     const playlistId = parseYouTubePlaylistId(input);
     if (playlistId) {
-      changeMusic('youtube_playlist', playlistId, 'YouTube playlist');
+      changeMusic(speakerId, 'youtube_playlist', playlistId, 'YouTube playlist');
       setCustomUrl('');
       return;
     }
     const ytId = parseYouTubeId(input);
     if (ytId) {
-      changeMusic('youtube', ytId, 'YouTube');
+      changeMusic(speakerId, 'youtube', ytId, 'YouTube');
       setCustomUrl('');
       return;
     }
     if (/^https?:\/\//i.test(input)) {
-      changeMusic('stream', input, 'Custom stream');
+      changeMusic(speakerId, 'stream', input, 'Custom stream');
       setCustomUrl('');
       return;
     }
@@ -493,7 +575,7 @@ export function OfficeRoom() {
     try {
       const res = await searchSong(input);
       if (res) {
-        changeMusic('youtube', res.id, res.title);
+        changeMusic(speakerId, 'youtube', res.id, res.title);
         setCustomUrl('');
       } else {
         toast.error('No match found — try pasting a YouTube link instead.');
@@ -503,9 +585,12 @@ export function OfficeRoom() {
     } finally {
       setSearching(false);
     }
-  }, [customUrl, searching, changeMusic]);
+  }, [customUrl, searching, changeMusic, activeSpeakerId]);
 
-  const stopMusic = useCallback(() => changeMusic('stream', '', ''), [changeMusic]);
+  const stopMusic = useCallback(
+    (speakerId: string) => changeMusic(speakerId, 'stream', '', ''),
+    [changeMusic],
+  );
 
   // Per-speaker local volume (0..1) + mute — just for yourself.
   const setSpeakerVolume = useCallback((speakerId: string, v: number) => {
@@ -560,8 +645,7 @@ export function OfficeRoom() {
 
       const hit = speakerAt(layout, px, py);
       if (!hit) return;
-      void voiceRef.current?.resumeAudio();
-      void musicRef.current?.resume();
+      resumeAllAudio();
       setMutedSpeakers((prev) => {
         const next = new Set(prev);
         if (next.has(hit.id)) next.delete(hit.id);
@@ -608,10 +692,46 @@ export function OfficeRoom() {
       }
       voiceRef.current?.updateProximity(distances);
 
-      // Speaker music: loudest audible speaker wins, each with its own range
-      // (ones this user muted are skipped).
-      musicRef.current?.setProximityVolume(
-        speakerVolumeAt(layout, me, mutedSpeakersRef.current, speakerVolumesRef.current),
+      // Speaker music: you hear exactly ONE speaker — the closest one in range
+      // that's playing (and not muted by you). Ties go to a random pick that
+      // sticks, so the music doesn't flip-flop as you move. Out of range = silence.
+      const near: { id: string; d: number; v: number }[] = [];
+      for (const item of layout.items) {
+        if (item.type !== 'speaker') continue;
+        const v = speakerProximity(layout, me, item);
+        if (v > 0) near.push({ id: item.id, d: speakerDistance(layout, me, item), v });
+      }
+      near.sort((a, b) => a.d - b.d);
+
+      const gainOf = (sid: string) =>
+        mutedSpeakersRef.current.has(sid) ? 0 : speakerVolumesRef.current.get(sid) ?? 1;
+      const candidates = near.filter((s) => musicBySpeakerRef.current[s.id]?.playing && gainOf(s.id) > 0);
+      let pick: string | null = null;
+      if (candidates.length) {
+        const closest = candidates[0].d;
+        const tied = candidates.filter((s) => s.d - closest < SPEAKER_TIE_DIST);
+        const current = audibleSpeakerRef.current;
+        pick = current && tied.some((s) => s.id === current)
+          ? current
+          : tied[Math.floor(Math.random() * tied.length)].id;
+      }
+
+      if (pick !== audibleSpeakerRef.current) {
+        const prev = audibleSpeakerRef.current;
+        if (prev) musicPlayersRef.current.get(prev)?.stop();
+        audibleSpeakerRef.current = pick;
+        setAudibleSpeaker(pick);
+        // (Re)start from the shared state — YouTube seeks to the live position.
+        if (pick) playerFor(pick).play(musicBySpeakerRef.current[pick]);
+      }
+      if (pick) {
+        const v = near.find((s) => s.id === pick)?.v ?? 0;
+        musicPlayersRef.current.get(pick)?.setProximityVolume(v * gainOf(pick));
+      }
+
+      const nextInRange = near.map((s) => s.id);
+      setInRange((prev) =>
+        prev.length === nextInRange.length && prev.every((x, i) => x === nextInRange[i]) ? prev : nextInRange,
       );
 
       const myRoom = roomAt(layout, me.x, me.y);
@@ -745,11 +865,7 @@ export function OfficeRoom() {
         }
 
         drawFloor(ctx, layout);
-        if (musicPlayingRef.current) {
-          drawSpeakerPulses(ctx, layout, performance.now(), mutedSpeakersRef.current);
-        } else {
-          drawMutedSpeakers(ctx, layout, mutedSpeakersRef.current);
-        }
+        drawSpeakerPulses(ctx, layout, performance.now(), mutedSpeakersRef.current, playingSpeakersRef.current);
         const myRoom = roomAt(layout, me.x, me.y);
         if (myRoom) highlightRoom(ctx, myRoom);
         drawAvatars(
@@ -783,7 +899,6 @@ export function OfficeRoom() {
 
   const isOwner = office.owner_id === profile?.id;
   const connectedCount = roster.filter((r) => r.connected).length;
-  const officeHasSpeaker = hasSpeaker(office.layout);
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -847,12 +962,11 @@ export function OfficeRoom() {
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        <main className="relative flex flex-1 items-center justify-center overflow-auto bg-dots p-2 sm:p-4">
+        <main className="relative flex flex-1 items-center justify-center overflow-hidden bg-dots p-2 sm:p-4">
           {audioBlocked && (
             <button
               onClick={() => {
-                void voiceRef.current?.resumeAudio();
-                void musicRef.current?.resume();
+                resumeAllAudio();
                 setAudioBlocked(false);
               }}
               className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-lg"
@@ -885,6 +999,296 @@ export function OfficeRoom() {
             }}
           />
 
+          {/* Speaker music: a disc appears while you're in range of a speaker */}
+          {activeSpeakerId && (() => {
+            const sid = activeSpeakerId;
+            const m = musicBySpeaker[sid];
+            const playing = Boolean(m?.playing);
+            const spMuted = mutedSpeakers.has(sid);
+            const vol = spMuted ? 0 : Math.round((speakerVolumes.get(sid) ?? 1) * 100);
+            const title = titles[sid] || m?.name;
+            const sourceLabel =
+              m?.kind === 'stream' ? 'Radio' : m?.kind === 'youtube_playlist' ? 'Playlist' : 'YouTube';
+            return (
+              <div className="absolute bottom-40 left-5 z-30 flex flex-col items-start gap-3 md:bottom-6 md:left-6">
+                {showMusic && (
+                  <div
+                    role="dialog"
+                    aria-label={`${speakerName(sid)} music`}
+                    className="flex max-h-[min(36rem,calc(100vh-22rem))] w-[22rem] max-w-[calc(100vw-2.5rem)] origin-bottom-left md:max-h-[min(36rem,calc(100vh-16rem))] animate-slide-up flex-col overflow-hidden rounded-2xl border bg-popover text-popover-foreground shadow-2xl"
+                  >
+                    {/* Header: which speaker */}
+                    <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Nearby speaker
+                        </p>
+                        {inRange.length > 1 ? (
+                          <div className="relative mt-0.5">
+                            <select
+                              value={sid}
+                              onChange={(e) => setPickedSpeaker(e.target.value)}
+                              className="max-w-full cursor-pointer appearance-none bg-transparent pr-6 text-base font-semibold outline-none"
+                              aria-label="Choose speaker"
+                            >
+                              {inRange.map((id) => (
+                                <option key={id} value={id} className="bg-popover text-sm">
+                                  {speakerName(id)}
+                                  {id === audibleSpeaker ? ' · hearing' : musicBySpeaker[id]?.playing ? ' ♫' : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown className="pointer-events-none absolute right-0 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                          </div>
+                        ) : (
+                          <p className="mt-0.5 text-base font-semibold">🔊 {speakerName(sid)}</p>
+                        )}
+                        {audibleSpeaker && audibleSpeaker !== sid && (
+                          <button
+                            onClick={() => setPickedSpeaker(audibleSpeaker)}
+                            className="mt-0.5 block text-xs text-violet-600 hover:underline dark:text-violet-300"
+                          >
+                            You're hearing {speakerName(audibleSpeaker)} — switch
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setShowMusic(false)}
+                        className="shrink-0 rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                        aria-label="Close music"
+                      >
+                        <X className="size-[18px]" />
+                      </button>
+                    </div>
+
+                    <div className="min-h-0 flex-1 overflow-y-auto">
+                      {/* Now playing + your volume for this speaker */}
+                      <div
+                        className={cn(
+                          'space-y-3 p-4',
+                          playing && 'bg-gradient-to-br from-violet-500/15 to-fuchsia-500/5',
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={cn(
+                              'flex size-11 shrink-0 items-center justify-center rounded-lg',
+                              playing ? 'bg-violet-500 text-white' : 'bg-muted text-muted-foreground',
+                            )}
+                          >
+                            {!playing ? (
+                              <Music className="size-5" />
+                            ) : m?.kind === 'stream' ? (
+                              <Radio className="size-5" />
+                            ) : m?.kind === 'youtube_playlist' ? (
+                              <ListMusic className="size-5" />
+                            ) : (
+                              <Disc3 className="size-5 animate-[spin_3s_linear_infinite]" />
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            {playing ? (
+                              <>
+                                <p className="truncate text-sm font-semibold">{title}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {deafened
+                                    ? 'Un-deafen to hear it'
+                                    : `${sourceLabel} · ${m?.by === profile?.id ? 'started by you' : 'shared with everyone'}`}
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-sm font-medium">Nothing playing</p>
+                                <p className="text-xs text-muted-foreground">Pick a station or search a song</p>
+                              </>
+                            )}
+                          </div>
+                          {playing && (
+                            <button
+                              onClick={() => stopMusic(sid)}
+                              title="Stop for everyone"
+                              aria-label="Stop music"
+                              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background transition hover:opacity-80"
+                            >
+                              <Square className="size-3.5 fill-current" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            onClick={() => toggleSpeakerMute(sid)}
+                            title={spMuted ? 'Unmute for yourself' : 'Mute for yourself'}
+                            className="shrink-0 rounded-md p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                          >
+                            {spMuted ? <VolumeX className="size-4 text-destructive" /> : <Volume2 className="size-4" />}
+                          </button>
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={vol}
+                            aria-label="My volume for this speaker"
+                            title="Only affects what you hear"
+                            onChange={(e) => {
+                              const v = Number(e.target.value) / 100;
+                              // Dragging the slider off 0 also un-mutes it.
+                              if (spMuted && v > 0) toggleSpeakerMute(sid);
+                              setSpeakerVolume(sid, v);
+                            }}
+                            className="h-1 min-w-0 flex-1 cursor-pointer accent-violet-500"
+                          />
+                          <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                            {vol}%
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Source tabs */}
+                      <div className="border-t p-4">
+                        <div className="mb-3 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="tablist">
+                          {(
+                            [
+                              ['radio', Radio, 'Radio'],
+                              ['search', Search, 'Search'],
+                            ] as const
+                          ).map(([key, Icon, label]) => (
+                            <button
+                              key={key}
+                              role="tab"
+                              aria-selected={musicTab === key}
+                              onClick={() => setMusicTab(key)}
+                              className={cn(
+                                'flex h-8 items-center justify-center gap-1.5 rounded-md text-sm font-medium transition',
+                                musicTab === key
+                                  ? 'bg-background text-foreground shadow-sm'
+                                  : 'text-muted-foreground hover:text-foreground',
+                              )}
+                            >
+                              <Icon className="size-4" /> {label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {musicTab === 'radio' ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {STATIONS.map((s) => {
+                              const active = playing && m?.src === s.url;
+                              return (
+                                <button
+                                  key={s.id}
+                                  onClick={() => (active ? stopMusic(sid) : changeMusic(sid, 'stream', s.url, s.name))}
+                                  title={active ? 'Stop' : `Play ${s.name}`}
+                                  className={cn(
+                                    'flex flex-col items-start gap-1 rounded-lg border p-2.5 text-left transition',
+                                    active
+                                      ? 'border-violet-500 bg-violet-500/10 ring-1 ring-violet-500'
+                                      : 'hover:border-foreground/20 hover:bg-accent',
+                                  )}
+                                >
+                                  <span className="flex w-full items-center justify-between">
+                                    <span className="text-xl leading-none">{s.icon}</span>
+                                    {active && <EqBars />}
+                                  </span>
+                                  <span
+                                    className={cn(
+                                      'w-full truncate text-xs font-medium',
+                                      active && 'text-violet-700 dark:text-violet-300',
+                                    )}
+                                  >
+                                    {s.name}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              void playCustom();
+                            }}
+                          >
+                            <div className="relative">
+                              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                              <input
+                                autoFocus
+                                value={customUrl}
+                                onChange={(e) => setCustomUrl(e.target.value)}
+                                placeholder="Song name or YouTube link"
+                                className="h-10 w-full rounded-lg border bg-transparent pl-9 pr-3 text-sm outline-none transition placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
+                              />
+                            </div>
+                            <Button type="submit" className="mt-2 h-9 w-full" disabled={searching || !customUrl.trim()}>
+                              {searching ? (
+                                'Searching…'
+                              ) : (
+                                <>
+                                  <Play className="size-4 fill-current" /> Play on this speaker
+                                </>
+                              )}
+                            </Button>
+                            <p className="mt-2 text-center text-xs text-muted-foreground">
+                              Works with videos and playlists
+                            </p>
+                          </form>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* The disc */}
+                <button
+                  onClick={() => {
+                    resumeAllAudio();
+                    setShowMusic((v) => !v);
+                  }}
+                  aria-label={showMusic ? 'Close music controls' : `Open music for ${speakerName(sid)}`}
+                  aria-expanded={showMusic}
+                  title={playing ? `♫ ${title}` : `${speakerName(sid)} — tap to play music`}
+                  className="group relative size-20 animate-fade-in rounded-full shadow-xl outline-none ring-offset-2 ring-offset-background transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-violet-500"
+                >
+                  {playing && !spMuted && (
+                    <span className="absolute inset-0 animate-disc-pulse rounded-full bg-violet-500/30" />
+                  )}
+                  <span
+                    className={cn(
+                      'absolute inset-0 rounded-full border border-white/10',
+                      '[background:repeating-radial-gradient(circle_at_center,#18181b_0px,#18181b_2px,#27272a_3px,#18181b_4px)]',
+                      playing && 'animate-[spin_4s_linear_infinite]',
+                      spMuted && 'opacity-60',
+                    )}
+                  >
+                    {/* label + highlight so the spin is visible */}
+                    <span className="absolute inset-0 rounded-full bg-[conic-gradient(from_0deg,transparent_0deg,rgba(255,255,255,0.18)_40deg,transparent_80deg,transparent_180deg,rgba(255,255,255,0.12)_220deg,transparent_260deg)]" />
+                    <span
+                      className={cn(
+                        'absolute left-1/2 top-1/2 size-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-zinc-900',
+                        playing ? 'bg-gradient-to-br from-violet-400 to-fuchsia-500' : 'bg-zinc-500',
+                      )}
+                    />
+                  </span>
+                  {showMusic ? (
+                    <span className="absolute right-0 top-0 flex size-6 items-center justify-center rounded-full bg-foreground text-background shadow">
+                      <X className="size-3.5" />
+                    </span>
+                  ) : spMuted ? (
+                    <span className="absolute right-0 top-0 flex size-6 items-center justify-center rounded-full bg-destructive text-white shadow">
+                      <VolumeX className="size-3.5" />
+                    </span>
+                  ) : (
+                    !playing && (
+                      <span className="absolute right-0 top-0 flex size-6 items-center justify-center rounded-full bg-violet-500 text-white shadow">
+                        <Music className="size-3.5" />
+                      </span>
+                    )
+                  )}
+                </button>
+              </div>
+            );
+          })()}
+
           {/* People toggle (mobile only) */}
           <button
             onClick={() => setShowRoster(true)}
@@ -905,242 +1309,217 @@ export function OfficeRoom() {
 
         <aside
           className={cn(
-            'overflow-y-auto border-border bg-background p-4',
+            'flex-col overflow-hidden border-border bg-background',
             // Desktop: fixed side panel.
-            'hidden shrink-0 md:block md:w-72 md:border-l',
+            'hidden shrink-0 md:flex md:w-80 md:border-l',
             // Mobile: slide-up drawer, toggled by the People button.
             showRoster &&
-              'absolute inset-x-0 bottom-0 z-40 block max-h-[70%] rounded-t-2xl border-t shadow-2xl',
+              'absolute inset-x-0 bottom-0 z-40 flex max-h-[75%] rounded-t-2xl border-t shadow-2xl',
           )}
         >
-          <div className="flex items-start justify-between">
-            <div>
-              <h2 className="text-sm font-semibold">In this office</h2>
-              <p className="mb-4 text-xs text-muted-foreground">
-                {roster.length} here · {connectedCount} in earshot
-              </p>
-            </div>
-            <button
-              onClick={() => setShowRoster(false)}
-              className="-mr-1 -mt-1 rounded-md p-1 text-muted-foreground hover:bg-accent md:hidden"
-              aria-label="Close"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-          {inRoom && (
-            <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs">
-              <p className="font-medium text-emerald-600 dark:text-emerald-400">🔇 In {inRoom}</p>
-              <p className="mt-0.5 text-muted-foreground">
-                Private room — you only hear others inside it, and they only hear you.
-              </p>
-            </div>
-          )}
-          {following && (
-            <div className="mb-4 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs">
-              <p className="flex min-w-0 items-center gap-1.5 text-amber-600 dark:text-amber-400">
-                <Footprints className="size-4 shrink-0" />
-                <span className="truncate font-medium">
-                  Following {roster.find((r) => r.id === following)?.name ?? 'someone'}
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold leading-tight">In this office</h2>
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+                <span className="tabular-nums">{roster.length} here</span>
+                <span aria-hidden>·</span>
+                <span className="flex items-center gap-1 tabular-nums">
+                  <span className="size-1.5 rounded-full bg-emerald-500" />
+                  {connectedCount} in earshot
                 </span>
               </p>
-              <Button size="sm" variant="secondary" className="h-7 shrink-0 px-2" onClick={() => setFollowing(null)}>
-                Stop
-              </Button>
             </div>
-          )}
-          <ul className="space-y-1.5">
-            {roster.map((r) => {
-              const isSelf = r.id === profile?.id;
-              const peerMuted = mutedPeers.has(r.id);
-              return (
-                <li
-                  key={r.id}
-                  className={cn(
-                    'flex items-center gap-2 rounded-lg px-2 py-1.5',
-                    !isSelf && 'cursor-pointer hover:bg-accent',
-                  )}
-                  onClick={isSelf ? undefined : () => togglePeerMute(r.id)}
-                  title={isSelf ? undefined : peerMuted ? 'Unmute for yourself' : 'Mute for yourself'}
-                >
-                  <Avatar name={r.name} color={r.color} className="size-7" />
-                  <div className="min-w-0 flex-1">
-                    <p className={cn('truncate text-sm font-medium', peerMuted && 'text-muted-foreground line-through')}>
-                      {r.name}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">{r.zone}</p>
-                  </div>
-                  {following === r.id && !isSelf && (
-                    <Footprints className="size-4 shrink-0 text-amber-500" aria-label="Following" />
-                  )}
-                  {r.deafened ? (
-                    <HeadphoneOff className="size-4 shrink-0 text-muted-foreground" aria-label="Deafened themselves" />
-                  ) : r.muted ? (
-                    <MicOff className="size-4 shrink-0 text-muted-foreground" aria-label="Muted themselves" />
-                  ) : null}
-                  {!isSelf && peerMuted ? (
-                    <VolumeX className="size-4 shrink-0 text-destructive" />
-                  ) : r.connected ? (
-                    <Badge variant="success">🔊</Badge>
-                  ) : !isSelf ? (
-                    <Volume2 className="size-4 shrink-0 text-muted-foreground/40" />
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-          {mutedPeers.size > 0 && (
-            <button
-              onClick={() => setMutedPeers(new Set())}
-              className="mt-2 text-xs font-medium text-primary hover:underline"
-            >
-              Unmute {mutedPeers.size} muted {mutedPeers.size > 1 ? 'people' : 'person'}
-            </button>
-          )}
-
-          {/* Speaker music */}
-          <div className="mt-6 border-t pt-4">
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-              <Music className="size-4" /> Speaker music
-            </h3>
-            {!officeHasSpeaker ? (
-              <p className="mt-2 text-xs text-muted-foreground">
-                No speaker placed yet. {isOwner ? 'Add a 🔊 Speaker in the editor' : 'Ask the owner to add a 🔊 Speaker'} —
-                then music plays louder as you walk toward it.
-              </p>
-            ) : (
-              <>
-                {music.playing ? (
-                  <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-violet-500/30 bg-violet-500/10 p-2.5">
-                    <p className="min-w-0 truncate text-xs">
-                      <span className="font-medium text-violet-600 dark:text-violet-300">
-                        ♫ {nowPlaying || music.name}
-                      </span>
-                      <span className="text-muted-foreground"> · {music.by === profile?.id ? 'you' : 'playing'}</span>
-                    </p>
-                    <Button size="sm" variant="secondary" className="h-7 shrink-0 px-2" onClick={stopMusic}>
-                      <Square className="size-3.5" /> Stop
-                    </Button>
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Type a song name, or pick a station — everyone in earshot of a speaker hears it.
-                  </p>
-                )}
-
-                <div className="mt-3 grid grid-cols-2 gap-1.5">
-                  {STATIONS.map((s) => {
-                    const active = music.playing && music.src === s.url;
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => changeMusic('stream', s.url, s.name)}
-                        className={cn(
-                          'flex items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left text-xs transition',
-                          active ? 'border-violet-500 bg-violet-500/10' : 'hover:bg-accent',
-                        )}
-                      >
-                        <span className="text-base leading-none">{s.icon}</span>
-                        <span className="truncate">{s.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <form
-                  className="mt-2 flex gap-1.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void playCustom();
-                  }}
-                >
-                  <input
-                    value={customUrl}
-                    onChange={(e) => setCustomUrl(e.target.value)}
-                    placeholder="Song name, YouTube link, or stream URL…"
-                    className="h-8 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-xs outline-none focus:border-primary"
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    variant="outline"
-                    className="h-8 px-2 text-xs"
-                    disabled={searching || !customUrl.trim()}
+            <div className="flex shrink-0 items-center gap-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="rounded-md p-1.5 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+                    aria-label="How it works"
+                    title="How it works"
                   >
-                    {searching ? '…' : 'Play'}
-                  </Button>
-                </form>
-                {deafened && music.playing && (
-                  <p className="mt-2 text-xs text-muted-foreground">Un-deafen to hear the music.</p>
-                )}
-
-                {/* Per-speaker volume, local to you */}
-                <div className="mt-4 space-y-2">
-                  <p className="text-xs font-medium text-muted-foreground">Speaker volume (just for you)</p>
-                  {office.layout.items
-                    .filter((it) => it.type === 'speaker')
-                    .map((sp, i) => {
-                      const spMuted = mutedSpeakers.has(sp.id);
-                      const vol = spMuted ? 0 : Math.round((speakerVolumes.get(sp.id) ?? 1) * 100);
-                      return (
-                        <div key={sp.id} className="flex items-center gap-2">
-                          <button
-                            onClick={() => toggleSpeakerMute(sp.id)}
-                            title={spMuted ? 'Unmute for yourself' : 'Mute for yourself'}
-                            className="shrink-0 text-muted-foreground hover:text-foreground"
-                          >
-                            {spMuted ? (
-                              <VolumeX className="size-4 text-destructive" />
-                            ) : (
-                              <Volume2 className="size-4" />
-                            )}
-                          </button>
-                          <span className="w-16 shrink-0 text-xs">🔊 Speaker {i + 1}</span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={100}
-                            value={vol}
-                            onChange={(e) => {
-                              const v = Number(e.target.value) / 100;
-                              // Dragging the slider off 0 also un-mutes it.
-                              if (spMuted && v > 0) toggleSpeakerMute(sp.id);
-                              setSpeakerVolume(sp.id, v);
-                            }}
-                            className="h-1 flex-1 cursor-pointer accent-violet-500"
-                          />
-                          <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-                            {vol}%
-                          </span>
-                        </div>
-                      );
-                    })}
-                  <p className="text-xs text-muted-foreground">
-                    Or tap a 🔊 speaker on the floor to mute it.
-                  </p>
-                </div>
-              </>
-            )}
+                    <Info className="size-[18px]" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-72 p-0">
+                  <div className="border-b px-4 py-3">
+                    <p className="text-sm font-semibold">How it works</p>
+                  </div>
+                  <ul className="space-y-2.5 px-4 py-3 text-sm text-muted-foreground">
+                    <li className="flex gap-2.5">
+                      <Footprints className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>
+                        <span className="md:hidden">Drag the joystick to move.</span>
+                        <span className="hidden md:inline">
+                          Move with <Kbd>WASD</Kbd> or the arrow keys.
+                        </span>
+                      </span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <Mic className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>Walk up to someone to talk — voice fades with distance.</span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <Users className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>Tap an avatar to follow them. Tap a name in the list to mute them for yourself.</span>
+                    </li>
+                    <li className="flex gap-2.5">
+                      <Music className="mt-0.5 size-4 shrink-0 text-foreground" />
+                      <span>Each 🔊 speaker plays its own music — you hear the closest one. Walk near one and tap the disc in the corner to choose what it plays.</span>
+                    </li>
+                  </ul>
+                  <div className="hidden border-t px-4 py-3 md:block">
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Shortcuts
+                    </p>
+                    <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-1.5 text-sm">
+                      <Kbd>M</Kbd>
+                      <span className="text-muted-foreground">Mute / unmute mic</span>
+                      <Kbd>⇧ M</Kbd>
+                      <span className="text-muted-foreground">Deafen</span>
+                    </div>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button
+                onClick={() => setShowRoster(false)}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent md:hidden"
+                aria-label="Close"
+              >
+                <X className="size-[18px]" />
+              </button>
+            </div>
           </div>
 
-          <p className="mt-6 text-xs text-muted-foreground">
-            <span className="md:hidden">Drag the joystick to move. </span>
-            <span className="hidden md:inline">
-              Move with <kbd className="rounded border px-1">WASD</kbd> or arrow keys.{' '}
-            </span>
-            Walk up to someone to talk. Tap their avatar to follow them.
-          </p>
-          <p className="mt-2 hidden text-xs text-muted-foreground md:block">
-            <kbd className="rounded border px-1">M</kbd> mute ·{' '}
-            <kbd className="rounded border px-1">⇧M</kbd> deafen
-          </p>
-          {!micOk && (
-            <p className="mt-3 text-xs text-destructive">
-              Mic unavailable — you can move and see others, but can't be heard.
-            </p>
-          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {/* Status banners */}
+            {(!micOk || inRoom || following) && (
+              <div className="space-y-2 px-5 pt-4">
+                {!micOk && (
+                  <div className="flex gap-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm">
+                    <MicOff className="mt-0.5 size-4 shrink-0 text-destructive" />
+                    <p className="text-destructive">Mic unavailable — others can't hear you.</p>
+                  </div>
+                )}
+                {inRoom && (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2.5">
+                    <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">🔇 In {inRoom}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                      Private room — only people inside can hear each other.
+                    </p>
+                  </div>
+                )}
+                {following && (
+                  <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 py-2 pl-3 pr-2">
+                    <p className="flex min-w-0 items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                      <Footprints className="size-4 shrink-0" />
+                      <span className="truncate font-medium">
+                        Following {roster.find((r) => r.id === following)?.name ?? 'someone'}
+                      </span>
+                    </p>
+                    <Button size="sm" variant="secondary" className="h-7 shrink-0 px-2.5" onClick={() => setFollowing(null)}>
+                      Stop
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* People */}
+            <section className="px-5 py-4">
+              <div className="mb-2 flex items-center justify-between">
+                <SectionLabel>People</SectionLabel>
+                {mutedPeers.size > 0 && (
+                  <button
+                    onClick={() => setMutedPeers(new Set())}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    Unmute {mutedPeers.size}
+                  </button>
+                )}
+              </div>
+              <ul className="-mx-2 space-y-0.5">
+
+                {roster.map((r) => {
+                  const isSelf = r.id === profile?.id;
+                  const peerMuted = mutedPeers.has(r.id);
+                  return (
+                    <li
+                      key={r.id}
+                      className={cn(
+                        'flex items-center gap-3 rounded-lg px-2 py-2',
+                        !isSelf && 'cursor-pointer transition hover:bg-accent',
+                      )}
+                      onClick={isSelf ? undefined : () => togglePeerMute(r.id)}
+                      title={isSelf ? undefined : peerMuted ? 'Unmute for yourself' : 'Mute for yourself'}
+                    >
+                      <Avatar name={r.name} color={r.color} className="size-8" />
+                      <div className="min-w-0 flex-1">
+                        <p
+                          className={cn(
+                            'truncate text-sm font-medium leading-tight',
+                            peerMuted && 'text-muted-foreground line-through',
+                          )}
+                        >
+                          {r.name}
+                          {isSelf && <span className="ml-1 font-normal text-muted-foreground">(you)</span>}
+                        </p>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{r.zone}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+                        {following === r.id && !isSelf && (
+                          <Footprints className="size-4 text-amber-500" aria-label="Following" />
+                        )}
+                        {r.deafened ? (
+                          <HeadphoneOff className="size-4" aria-label="Deafened themselves" />
+                        ) : r.muted ? (
+                          <MicOff className="size-4" aria-label="Muted themselves" />
+                        ) : null}
+                        {!isSelf && peerMuted ? (
+                          <VolumeX className="size-4 text-destructive" aria-label="Muted for you" />
+                        ) : r.connected ? (
+                          <Badge variant="success" className="px-2">
+                            <Volume2 className="size-3.5" />
+                          </Badge>
+                        ) : !isSelf ? (
+                          <Volume2 className="size-4 opacity-30" aria-label="Out of earshot" />
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          </div>
         </aside>
       </div>
     </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>;
+}
+
+function Kbd({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="inline-flex h-5 min-w-5 items-center justify-center rounded border bg-muted px-1.5 font-mono text-[11px] font-medium text-foreground">
+      {children}
+    </kbd>
+  );
+}
+
+/** Tiny animated equalizer shown on the active station. */
+function EqBars() {
+  return (
+    <span className="flex h-3.5 items-end gap-[2px]" aria-label="Playing">
+      {[0, 0.2, 0.4].map((d) => (
+        <span
+          key={d}
+          className="h-full w-[3px] origin-bottom animate-eq rounded-full bg-violet-500"
+          style={{ animationDelay: `${d}s` }}
+        />
+      ))}
+    </span>
   );
 }
