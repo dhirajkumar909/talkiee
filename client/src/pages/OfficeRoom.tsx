@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  ArrowLeft,
   Bell,
   BellOff,
   ChevronDown,
@@ -15,7 +14,9 @@ import {
   Mic,
   MicOff,
   Music,
-  Pencil,
+  PencilRuler,
+  PhoneOff,
+  MapPin,
   Play,
   Radio,
   Search,
@@ -68,6 +69,7 @@ import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { Joystick } from '../components/Joystick';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { Logo } from '../components/Logo';
 import { cn } from '../lib/utils';
 
 /** How close (px) to trail behind someone you're following. */
@@ -899,65 +901,153 @@ export function OfficeRoom() {
 
   const isOwner = office.owner_id === profile?.id;
   const connectedCount = roster.filter((r) => r.connected).length;
+  const myZone = roster.find((r) => r.id === profile?.id)?.zone;
 
   return (
     <div className="flex h-screen flex-col bg-background">
-      <header className="flex h-14 items-center justify-between border-b px-4">
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
-            <ArrowLeft /> Leave
-          </Button>
-          <h1 className="font-semibold">{office.name}</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          {isNotificationSupported() && (
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleNotificationToggle}
-              title={
-                notifyPerm === 'denied'
-                  ? 'Notifications blocked by browser settings'
-                  : notifyPerm === 'default'
-                  ? 'Enable desktop notifications'
-                  : notificationsEnabled
-                  ? 'Notifications enabled (click to mute)'
-                  : 'Notifications muted (click to unmute)'
-              }
-              aria-label="Toggle notifications"
-            >
-              {notifyPerm === 'denied' || !notificationsEnabled ? (
-                <BellOff className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <Bell className={cn('h-4 w-4', notifyPerm === 'granted' ? 'text-primary' : 'text-foreground')} />
+      <header className="relative z-40 flex h-16 shrink-0 items-center gap-3 border-b bg-background px-3 sm:px-4">
+        {/* Identity: brand mark → office name + where you are */}
+        <div className="flex min-w-0 items-center gap-3">
+          <Link
+            to="/dashboard"
+            title="Back to dashboard"
+            className="rounded-lg p-1 outline-none transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Logo showWordmark={false} />
+          </Link>
+          <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="truncate text-[15px] font-semibold leading-5">{office.name}</h1>
+              {isOwner && (
+                <span className="hidden rounded-md border px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted-foreground sm:inline">
+                  Owner
+                </span>
               )}
-            </Button>
-          )}
-          <ThemeToggle />
-          {isOwner && (
-            <Button variant="outline" size="sm" onClick={() => navigate(`/office/${office.id}/edit`)}>
-              <Pencil /> Edit
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant={muted ? 'secondary' : 'default'}
-            disabled={!micOk || deafened}
-            onClick={toggleMute}
-            title={micOk ? 'Toggle microphone (M)' : 'Microphone unavailable'}
+            </div>
+            <p className="flex items-center gap-1.5 truncate text-xs leading-4 text-muted-foreground">
+              <MapPin className="size-3 shrink-0" />
+              <span className="truncate">{myZone || 'Walking around'}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Presence: who's here */}
+        <button
+          type="button"
+          onClick={() => setShowRoster(true)}
+          className="mx-auto hidden items-center gap-2.5 rounded-full border bg-muted/40 py-1 pl-1 pr-3 transition-colors hover:bg-muted md:flex md:cursor-default md:hover:bg-muted/40"
+          title={`${roster.length} in this office`}
+        >
+          <div className="flex -space-x-2">
+            {roster.slice(0, 5).map((r) => (
+              <Avatar key={r.id} name={r.name.replace(' (you)', '')} color={r.color} className="size-7 text-[10px]" />
+            ))}
+            {roster.length > 5 && (
+              <span className="inline-flex size-7 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground ring-2 ring-background">
+                +{roster.length - 5}
+              </span>
+            )}
+          </div>
+          <span className="flex items-center gap-1.5 text-xs font-medium tabular-nums">
+            <span className="relative flex size-2">
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-60" />
+              <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+            </span>
+            {roster.length} online
+          </span>
+        </button>
+
+        <div className="ml-auto flex items-center gap-2 md:ml-0">
+          {/* Voice controls */}
+          <div className="flex items-center gap-1 rounded-xl border bg-muted/40 p-1">
+            <button
+              type="button"
+              disabled={!micOk || deafened}
+              onClick={toggleMute}
+              title={micOk ? (muted ? 'Unmute microphone (M)' : 'Mute microphone (M)') : 'Microphone unavailable'}
+              aria-pressed={!muted}
+              className={cn(
+                'flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50',
+                muted
+                  ? 'text-muted-foreground hover:bg-background hover:text-foreground'
+                  : 'bg-emerald-500 text-white shadow-sm hover:bg-emerald-500/90',
+              )}
+            >
+              {muted ? <MicOff className="size-[18px]" strokeWidth={1.75} /> : <Mic className="size-[18px]" strokeWidth={1.75} />}
+              <span className="hidden lg:inline">{muted ? 'Muted' : 'Live'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={toggleDeafen}
+              title={deafened ? 'Undeafen (Shift+M)' : 'Deafen — silence everyone (Shift+M)'}
+              aria-pressed={deafened}
+              className={cn(
+                'flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                deafened
+                  ? 'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90'
+                  : 'text-muted-foreground hover:bg-background hover:text-foreground',
+              )}
+            >
+              {deafened ? (
+                <HeadphoneOff className="size-[18px]" strokeWidth={1.75} />
+              ) : (
+                <Headphones className="size-[18px]" strokeWidth={1.75} />
+              )}
+              <span className="hidden lg:inline">{deafened ? 'Deafened' : 'Deafen'}</span>
+            </button>
+          </div>
+
+          {/* Utilities */}
+          <div className="flex items-center">
+            {isNotificationSupported() && (
+              <button
+                type="button"
+                onClick={handleNotificationToggle}
+                title={
+                  notifyPerm === 'denied'
+                    ? 'Notifications blocked by browser settings'
+                    : notifyPerm === 'default'
+                    ? 'Enable desktop notifications'
+                    : notificationsEnabled
+                    ? 'Notifications on (click to mute)'
+                    : 'Notifications muted (click to unmute)'
+                }
+                aria-label="Toggle notifications"
+                className="grid size-9 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {notifyPerm === 'denied' || !notificationsEnabled ? (
+                  <BellOff className="size-[18px]" strokeWidth={1.75} />
+                ) : (
+                  <Bell className="size-[18px]" strokeWidth={1.75} />
+                )}
+              </button>
+            )}
+            <ThemeToggle className="rounded-lg text-muted-foreground hover:text-foreground [&_svg]:size-[18px]" />
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => navigate(`/office/${office.id}/edit`)}
+                title="Edit office layout"
+                aria-label="Edit office layout"
+                className="grid size-9 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <PencilRuler className="size-[18px]" strokeWidth={1.75} />
+              </button>
+            )}
+          </div>
+
+          <span className="hidden h-6 w-px bg-border sm:block" aria-hidden="true" />
+
+          <button
+            type="button"
+            onClick={() => navigate('/dashboard')}
+            title="Leave office"
+            className="flex h-9 items-center gap-2 rounded-lg bg-destructive/10 px-3 text-sm font-medium text-destructive outline-none transition-colors hover:bg-destructive hover:text-destructive-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {muted ? <MicOff /> : <Mic />}
-            {muted ? 'Muted' : 'Live'}
-          </Button>
-          <Button
-            size="sm"
-            variant={deafened ? 'destructive' : 'secondary'}
-            onClick={toggleDeafen}
-            title="Toggle deafen — silence everyone (Shift+M)"
-          >
-            {deafened ? <HeadphoneOff /> : <Headphones />}
-            {deafened ? 'Deafened' : 'Deafen'}
-          </Button>
+            <PhoneOff className="size-4" strokeWidth={2} />
+            <span className="hidden sm:inline">Leave</span>
+          </button>
         </div>
       </header>
 
