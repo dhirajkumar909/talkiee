@@ -962,7 +962,7 @@ export function OfficeRoom() {
       </header>
 
       <div className="relative flex min-h-0 flex-1">
-        <main className="relative flex flex-1 items-center justify-center overflow-auto bg-dots p-2 sm:p-4">
+        <main className="relative flex flex-1 items-center justify-center overflow-hidden bg-dots p-2 sm:p-4">
           {audioBlocked && (
             <button
               onClick={() => {
@@ -1250,7 +1250,7 @@ export function OfficeRoom() {
                   className="group relative size-20 animate-fade-in rounded-full shadow-xl outline-none ring-offset-2 ring-offset-background transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-violet-500"
                 >
                   {playing && !spMuted && (
-                    <span className="absolute inset-0 animate-ping rounded-full bg-violet-500/30 [animation-duration:2s]" />
+                    <span className="absolute inset-0 animate-disc-pulse rounded-full bg-violet-500/30" />
                   )}
                   <span
                     className={cn(
