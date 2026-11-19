@@ -97,6 +97,8 @@ export interface PresenceState {
   muted?: boolean;
   /** They've deafened themselves? (broadcast; shown on their avatar) */
   deafened?: boolean;
+  /** Accumulated distance walked on-screen (used for footstep sfx). */
+  distWalked?: number;
 }
 
 /** Broadcast when a user toggles their own mic-mute / deafen. */

@@ -1,3 +1,4 @@
+import { playFootstep, resumeAudioContext } from '../office/sfx';
 import { RemoteTrack } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -377,6 +378,7 @@ export function OfficeRoom() {
   // Keyboard shortcuts: M = mute, Shift+M = deafen (avoids the WASD movement keys).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      resumeAudioContext();
       if (e.target instanceof HTMLInputElement) return;
       if (e.key.toLowerCase() === 'm') {
         e.preventDefault();
@@ -384,8 +386,14 @@ export function OfficeRoom() {
         else toggleMute();
       }
     };
+    const onClick = () => resumeAudioContext();
+    
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('click', onClick);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('click', onClick);
+    };
   }, [toggleMute, toggleDeafen]);
 
   // Load the office record.
@@ -951,6 +959,16 @@ export function OfficeRoom() {
             y: me.y + (dy / len) * speed,
           };
           const next = resolveMove(layout, me, target);
+          
+          const moved = Math.hypot(next.x - me.x, next.y - me.y);
+          if (moved > 0.1) {
+            me.distWalked = (me.distWalked || 0) + moved;
+            if (me.distWalked > 45) {
+              me.distWalked = 0;
+              playFootstep(0, 100, 200); // hear our own footsteps fully
+            }
+          }
+          
           me.x = next.x;
           me.y = next.y;
           const now = performance.now();
@@ -975,12 +993,27 @@ export function OfficeRoom() {
           if (p.rx === undefined || p.ry === undefined) {
             p.rx = p.x;
             p.ry = p.y;
+            p.distWalked = 0;
           } else if (Math.hypot(p.x - p.rx, p.y - p.ry) > CELL * 4) {
             p.rx = p.x; // big jump (join/teleport) → snap, don't glide across the floor
             p.ry = p.y;
           } else {
-            p.rx += (p.x - p.rx) * smooth;
-            p.ry += (p.y - p.ry) * smooth;
+            const dx = (p.x - p.rx) * smooth;
+            const dy = (p.y - p.ry) * smooth;
+            p.rx += dx;
+            p.ry += dy;
+
+            const moved = Math.hypot(dx, dy);
+            if (moved > 0.1) {
+              p.distWalked = (p.distWalked || 0) + moved;
+              // A footstep every ~45 pixels walked
+              if (p.distWalked > 45) {
+                p.distWalked = 0;
+                const dist = audioDistance(layout, me, p);
+                const vr = voiceRanges(layout);
+                playFootstep(dist, vr.full, vr.hearing);
+              }
+            }
           }
         }
 
