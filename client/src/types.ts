@@ -114,11 +114,13 @@ export interface SignalPayload {
 }
 
 /**
- * Shared "now playing" state for the office speakers, broadcast over the
- * realtime channel. When `playing` is true, every client plays `src` locally
- * at a volume scaled by proximity to the nearest speaker item.
+ * "Now playing" state for ONE speaker, broadcast over the realtime channel.
+ * Every speaker has its own channel: when `playing` is true, every client plays
+ * `src` locally at a volume scaled by proximity to that speaker.
  */
 export interface MusicState {
+  /** The speaker item this state belongs to. */
+  speakerId: string;
   playing: boolean;
   /**
    * 'stream' = direct audio URL (radio); 'youtube' = a single video id;

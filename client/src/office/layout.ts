@@ -618,6 +618,29 @@ export function speakerVolumeAt(
   return vol;
 }
 
+/** How loud one speaker is for a listener (0..1), before any personal gain/mute. */
+export function speakerProximity(
+  layout: OfficeLayout,
+  listener: { x: number; y: number },
+  item: LayoutItem,
+): number {
+  const { hearing, full } = speakerRanges(item);
+  return volumeForDistance(speakerDistance(layout, listener, item), full, hearing);
+}
+
+/** Audio distance (px) from a listener to a speaker's center — Infinity through walls / room boundaries. */
+export function speakerDistance(
+  layout: OfficeLayout,
+  listener: { x: number; y: number },
+  item: LayoutItem,
+): number {
+  const center = {
+    x: (item.x + item.w / 2) * CELL,
+    y: (item.y + item.h / 2) * CELL,
+  };
+  return audioDistance(layout, listener, center);
+}
+
 /** The speaker item at a pixel point (with a little padding for easy tapping), else null. */
 export function speakerAt(
   layout: OfficeLayout,

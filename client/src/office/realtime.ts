@@ -9,7 +9,7 @@ export interface OfficeChannelHandlers {
   onMove: (move: MovePayload) => void;
   /** WebRTC signaling message addressed to us. */
   onSignal: (from: string, data: unknown) => void;
-  /** Shared speaker music changed (someone pressed play/stop). */
+  /** A speaker's music changed (someone pressed play/stop on it). */
   onMusic: (state: MusicState) => void;
   /** A peer toggled their own mic-mute / deafen. */
   onStatus: (status: StatusPayload) => void;
@@ -27,8 +27,8 @@ export class OfficeChannel {
   private channel: RealtimeChannel;
   private me: PresenceState;
   private ready = false;
-  /** Last music state we broadcast, re-sent to late joiners so they sync up. */
-  private music: MusicState | null = null;
+  /** Last known music state per speaker, re-sent to late joiners so they sync up. */
+  private music = new Map<string, MusicState>();
   /** Our own mute/deafen status, re-sent to late joiners. */
   private status: StatusPayload | null = null;
   /** Tracks whether the initial presence sync has completed to avoid join spam on room entry. */
@@ -77,8 +77,8 @@ export class OfficeChannel {
         // and we deliberately never re-track — repeated track() drops the channel).
         if (key !== this.me.userId) {
           this.sendMove(this.me.x, this.me.y);
-          // Re-sync shared music to the newcomer if we're the one playing it.
-          if (this.music?.playing) void this.rawSendMusic(this.music);
+          // Re-sync every playing speaker to the newcomer.
+          for (const m of this.music.values()) if (m.playing) void this.rawSendMusic(m);
           // Let the newcomer know our current mute/deafen state.
           if (this.status) void this.rawSendStatus(this.status);
 
@@ -114,9 +114,12 @@ export class OfficeChannel {
       })
       .on('broadcast', { event: 'music' }, ({ payload }) => {
         // Remember what's playing so *we* can re-sync future joiners too — not
-        // only the person who originally started it.
-        this.music = payload as MusicState;
-        handlers.onMusic(this.music);
+        // only the person who originally started it. Payloads without a
+        // speakerId come from older clients (one office-wide channel); ignore.
+        const state = payload as MusicState;
+        if (!state?.speakerId) return;
+        this.music.set(state.speakerId, state);
+        handlers.onMusic(state);
       })
       .on('broadcast', { event: 'status' }, ({ payload }) => {
         handlers.onStatus(payload as StatusPayload);
@@ -150,9 +153,9 @@ export class OfficeChannel {
   }
 
 
-  /** Broadcast a change to the shared speaker music (play/stop/station). */
+  /** Broadcast a change to one speaker's music (play/stop/station). */
   sendMusic(state: MusicState) {
-    this.music = state;
+    this.music.set(state.speakerId, state);
     void this.rawSendMusic(state);
   }
 
