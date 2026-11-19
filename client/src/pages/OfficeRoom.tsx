@@ -65,7 +65,6 @@ import {
 } from '../office/layout';
 import { Button } from '../components/ui/button';
 import { Avatar } from '../components/ui/avatar';
-import { Badge } from '../components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { Joystick } from '../components/Joystick';
 import { ThemeToggle } from '../components/ThemeToggle';
@@ -899,8 +898,12 @@ export function OfficeRoom() {
   }
 
   const isOwner = office.owner_id === profile?.id;
-  const connectedCount = roster.filter((r) => r.connected).length;
   const myZone = roster.find((r) => r.id === profile?.id)?.zone;
+  const me = roster.find((r) => r.id === profile?.id);
+  const others = roster.filter((r) => r.id !== profile?.id);
+  const earshot = others.filter((r) => r.connected);
+  const away = others.filter((r) => !r.connected);
+  const talking = roster.filter((r) => !r.muted && !r.deafened).length;
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -1396,19 +1399,13 @@ export function OfficeRoom() {
           )}
         >
           {/* Header */}
-          <div className="flex items-center justify-between gap-3 border-b px-5 py-4">
-            <div className="min-w-0">
-              <h2 className="text-base font-semibold leading-tight">In this office</h2>
-              <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-                <span className="tabular-nums">{roster.length} here</span>
-                <span aria-hidden>·</span>
-                <span className="flex items-center gap-1 tabular-nums">
-                  <span className="size-1.5 rounded-full bg-emerald-500" />
-                  {connectedCount} in earshot
-                </span>
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
+          <div className="border-b px-5 pb-4 pt-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold leading-tight tracking-tight">People</h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">Who's around and who can hear you</p>
+              </div>
+              <div className="-mr-1.5 -mt-1 flex shrink-0 items-center gap-0.5">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -1439,7 +1436,7 @@ export function OfficeRoom() {
                     </li>
                     <li className="flex gap-2.5">
                       <Users className="mt-0.5 size-4 shrink-0 text-foreground" />
-                      <span>Tap an avatar to follow them. Tap a name in the list to mute them for yourself.</span>
+                      <span>Tap an avatar to follow them. Use the buttons next to a name to follow or mute someone just for you.</span>
                     </li>
                     <li className="flex gap-2.5">
                       <Music className="mt-0.5 size-4 shrink-0 text-foreground" />
@@ -1459,13 +1456,20 @@ export function OfficeRoom() {
                   </div>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <button
-                onClick={() => setShowRoster(false)}
-                className="rounded-md p-1.5 text-muted-foreground hover:bg-accent md:hidden"
-                aria-label="Close"
-              >
-                <X className="size-[18px]" />
-              </button>
+                <button
+                  onClick={() => setShowRoster(false)}
+                  className="rounded-md p-1.5 text-muted-foreground hover:bg-accent md:hidden"
+                  aria-label="Close"
+                >
+                  <X className="size-[18px]" />
+                </button>
+              </div>
+            </div>
+            {/* Stats */}
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <Stat label="In office" value={roster.length} />
+              <Stat label="In earshot" value={earshot.length} tone="emerald" />
+              <Stat label="Mic on" value={talking} tone="violet" />
             </div>
           </div>
 
@@ -1503,71 +1507,95 @@ export function OfficeRoom() {
               </div>
             )}
 
-            {/* People */}
-            <section className="px-5 py-4">
-              <div className="mb-2 flex items-center justify-between">
-                <SectionLabel>People</SectionLabel>
-                {mutedPeers.size > 0 && (
-                  <button
-                    onClick={() => setMutedPeers(new Set())}
-                    className="text-xs font-medium text-primary hover:underline"
-                  >
-                    Unmute {mutedPeers.size}
-                  </button>
-                )}
-              </div>
-              <ul className="-mx-2 space-y-0.5">
-
-                {roster.map((r) => {
-                  const isSelf = r.id === profile?.id;
-                  const peerMuted = mutedPeers.has(r.id);
-                  return (
-                    <li
-                      key={r.id}
+            {/* You */}
+            {me && (
+              <section className="px-5 pt-4">
+                <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-muted/70 to-background p-3">
+                  <div
+                    className="pointer-events-none absolute -right-8 -top-8 size-24 rounded-full opacity-20 blur-2xl"
+                    style={{ background: me.color }}
+                  />
+                  <div className="relative flex items-center gap-3">
+                    <PersonAvatar person={me} size="lg" live={!muted && !deafened} />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold">{stripYou(me.name)}</p>
+                      <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                        <MapPin className="size-3 shrink-0" />
+                        {me.zone}
+                      </p>
+                    </div>
+                    <span
                       className={cn(
-                        'flex items-center gap-3 rounded-lg px-2 py-2',
-                        !isSelf && 'cursor-pointer transition hover:bg-accent',
+                        'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold',
+                        deafened
+                          ? 'bg-destructive/15 text-destructive'
+                          : muted
+                          ? 'bg-muted text-muted-foreground'
+                          : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
                       )}
-                      onClick={isSelf ? undefined : () => togglePeerMute(r.id)}
-                      title={isSelf ? undefined : peerMuted ? 'Unmute for yourself' : 'Mute for yourself'}
                     >
-                      <Avatar name={r.name} color={r.color} className="size-8" />
-                      <div className="min-w-0 flex-1">
-                        <p
-                          className={cn(
-                            'truncate text-sm font-medium leading-tight',
-                            peerMuted && 'text-muted-foreground line-through',
-                          )}
-                        >
-                          {r.name}
-                          {isSelf && <span className="ml-1 font-normal text-muted-foreground">(you)</span>}
-                        </p>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">{r.zone}</p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
-                        {following === r.id && !isSelf && (
-                          <Footprints className="size-4 text-amber-500" aria-label="Following" />
-                        )}
-                        {r.deafened ? (
-                          <HeadphoneOff className="size-4" aria-label="Deafened themselves" />
-                        ) : r.muted ? (
-                          <MicOff className="size-4" aria-label="Muted themselves" />
-                        ) : null}
-                        {!isSelf && peerMuted ? (
-                          <VolumeX className="size-4 text-destructive" aria-label="Muted for you" />
-                        ) : r.connected ? (
-                          <Badge variant="success" className="px-2">
-                            <Volume2 className="size-3.5" />
-                          </Badge>
-                        ) : !isSelf ? (
-                          <Volume2 className="size-4 opacity-30" aria-label="Out of earshot" />
-                        ) : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
+                      {deafened ? (
+                        <HeadphoneOff className="size-3" />
+                      ) : muted ? (
+                        <MicOff className="size-3" />
+                      ) : (
+                        <Mic className="size-3" />
+                      )}
+                      {deafened ? 'Deafened' : muted ? 'Muted' : 'Live'}
+                    </span>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {others.length === 0 ? (
+              <div className="flex flex-col items-center px-8 py-12 text-center">
+                <div className="mb-3 grid size-12 place-items-center rounded-full bg-muted">
+                  <Users className="size-5 text-muted-foreground" />
+                </div>
+                <p className="text-sm font-medium">It's quiet in here</p>
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  You're the only one in {office.name} right now. Teammates show up here as soon as they join.
+                </p>
+              </div>
+            ) : (
+              <>
+                {mutedPeers.size > 0 && (
+                  <div className="mx-5 mt-4 flex items-center justify-between rounded-lg bg-muted/60 px-3 py-2 text-xs">
+                    <span className="flex items-center gap-1.5 text-muted-foreground">
+                      <VolumeX className="size-3.5" />
+                      {mutedPeers.size} muted for you
+                    </span>
+                    <button
+                      onClick={() => setMutedPeers(new Set())}
+                      className="font-semibold text-foreground hover:underline"
+                    >
+                      Unmute all
+                    </button>
+                  </div>
+                )}
+                <PeopleGroup
+                  title="Within earshot"
+                  hint="They can hear you"
+                  dot="bg-emerald-500"
+                  people={earshot}
+                  following={following}
+                  mutedPeers={mutedPeers}
+                  onFollow={(id) => setFollowing((cur) => (cur === id ? null : id))}
+                  onMute={togglePeerMute}
+                />
+                <PeopleGroup
+                  title="Out of range"
+                  hint="Walk closer to talk"
+                  dot="bg-muted-foreground/40"
+                  people={away}
+                  following={following}
+                  mutedPeers={mutedPeers}
+                  onFollow={(id) => setFollowing((cur) => (cur === id ? null : id))}
+                  onMute={togglePeerMute}
+                />
+              </>
+            )}
           </div>
         </aside>
       </div>
@@ -1575,9 +1603,181 @@ export function OfficeRoom() {
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{children}</h3>;
+type RosterPerson = {
+  id: string;
+  name: string;
+  color: string;
+  zone: string;
+  connected: boolean;
+  muted: boolean;
+  deafened: boolean;
+};
+
+const stripYou = (name: string) => name.replace(/ \(you\)$/, '');
+
+function Stat({ label, value, tone }: { label: string; value: number; tone?: 'emerald' | 'violet' }) {
+  return (
+    <div className="rounded-lg border bg-muted/30 px-2.5 py-2">
+      <p
+        className={cn(
+          'text-lg font-semibold leading-none tabular-nums',
+          tone === 'emerald' && 'text-emerald-600 dark:text-emerald-400',
+          tone === 'violet' && 'text-violet-600 dark:text-violet-400',
+        )}
+      >
+        {value}
+      </p>
+      <p className="mt-1 truncate text-[11px] text-muted-foreground">{label}</p>
+    </div>
+  );
 }
+
+/** Avatar with a presence dot and a tiny mic/headphone badge. */
+function PersonAvatar({
+  person,
+  size = 'md',
+  live,
+}: {
+  person: RosterPerson;
+  size?: 'md' | 'lg';
+  live?: boolean;
+}) {
+  const isLive = live ?? (!person.muted && !person.deafened);
+  return (
+    <span className="relative shrink-0">
+      <Avatar
+        name={stripYou(person.name)}
+        color={person.color}
+        className={cn(size === 'lg' ? 'size-11 text-sm' : 'size-9', isLive && 'ring-2 ring-emerald-500/70 ring-offset-2 ring-offset-background')}
+      />
+      {(person.muted || person.deafened) && (
+        <span className="absolute -bottom-0.5 -right-0.5 grid size-4 place-items-center rounded-full border-2 border-background bg-muted text-muted-foreground">
+          {person.deafened ? <HeadphoneOff className="size-2.5" /> : <MicOff className="size-2.5" />}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function PeopleGroup({
+  title,
+  hint,
+  dot,
+  people,
+  following,
+  mutedPeers,
+  onFollow,
+  onMute,
+}: {
+  title: string;
+  hint: string;
+  dot: string;
+  people: RosterPerson[];
+  following: string | null;
+  mutedPeers: Set<string>;
+  onFollow: (id: string) => void;
+  onMute: (id: string) => void;
+}) {
+  if (people.length === 0) return null;
+  return (
+    <section className="px-5 pt-5 last:pb-5">
+      <div className="mb-2 flex items-baseline justify-between">
+        <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <span className={cn('size-1.5 rounded-full', dot)} />
+          {title}
+          <span className="rounded-full bg-muted px-1.5 py-px text-[10px] tabular-nums">{people.length}</span>
+        </h3>
+        <span className="text-[11px] text-muted-foreground/80">{hint}</span>
+      </div>
+      <ul className="-mx-2 space-y-0.5">
+        {people.map((r) => {
+          const peerMuted = mutedPeers.has(r.id);
+          const isFollowing = following === r.id;
+          return (
+            <li
+              key={r.id}
+              className={cn(
+                'group flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-accent/70',
+                isFollowing && 'bg-amber-500/10 hover:bg-amber-500/15',
+                !r.connected && 'opacity-70 hover:opacity-100',
+              )}
+            >
+              <PersonAvatar person={r} />
+              <div className="min-w-0 flex-1">
+                <p className={cn('truncate text-sm font-medium leading-tight', peerMuted && 'text-muted-foreground line-through')}>
+                  {r.name}
+                </p>
+                <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
+                  {isFollowing ? (
+                    <span className="flex items-center gap-1 font-medium text-amber-600 dark:text-amber-400">
+                      <Footprints className="size-3" /> Following
+                    </span>
+                  ) : (
+                    <>
+                      <MapPin className="size-3 shrink-0" />
+                      <span className="truncate">{r.zone}</span>
+                    </>
+                  )}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <RowAction
+                  active={isFollowing}
+                  activeClass="bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  label={isFollowing ? 'Stop following' : `Follow ${r.name}`}
+                  onClick={() => onFollow(r.id)}
+                >
+                  <Footprints className="size-4" />
+                </RowAction>
+                <RowAction
+                  active={peerMuted}
+                  activeClass="bg-destructive/15 text-destructive"
+                  label={peerMuted ? 'Unmute for yourself' : 'Mute for yourself'}
+                  onClick={() => onMute(r.id)}
+                >
+                  {peerMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+                </RowAction>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function RowAction({
+  active,
+  activeClass,
+  label,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  activeClass: string;
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={cn(
+        'grid size-8 place-items-center rounded-lg outline-none transition focus-visible:ring-2 focus-visible:ring-ring',
+        active
+          ? activeClass
+          : 'text-muted-foreground opacity-100 hover:bg-background hover:text-foreground md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100',
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
