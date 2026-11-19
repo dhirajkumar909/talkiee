@@ -1,3 +1,4 @@
+import { RemoteTrack } from 'livekit-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -15,6 +16,10 @@ import {
   MicOff,
   Music,
   ArrowLeft,
+  Maximize2,
+  Minimize2,
+  Monitor,
+  MonitorOff,
   PencilRuler,
   MapPin,
   Play,
@@ -110,6 +115,90 @@ function loadSavedMusic(officeId: string): SpeakerMusic {
   }
 }
 
+function ScreenSharePlayer({ track, name, onClose }: { track: RemoteTrack; name: string; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      track.attach(videoRef.current);
+    }
+    return () => {
+      track.detach();
+    };
+  }, [track]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch((err) => {
+        console.warn(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/90 p-4 backdrop-blur-sm">
+      <div 
+        ref={containerRef} 
+        className={cn(
+          "flex flex-col w-full",
+          isFullscreen ? "h-screen bg-black" : "max-w-5xl"
+        )}
+      >
+        {!isFullscreen && (
+          <div className="flex w-full items-center justify-between rounded-t-lg bg-card p-3 shadow-sm border border-b-0">
+            <h3 className="font-medium">{name}'s Screen</h3>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" onClick={toggleFullscreen} title="Full screen">
+                <Maximize2 className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={onClose} title="Close">
+                <X className="size-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+        <div className={cn(
+          "group relative flex w-full items-center justify-center overflow-hidden bg-black",
+          isFullscreen ? "h-full" : "rounded-b-lg border shadow-lg"
+        )}>
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            className={cn(
+              "w-full object-contain",
+              isFullscreen ? "h-full" : "max-h-[80vh]"
+            )} 
+          />
+          {isFullscreen && (
+            <Button 
+              variant="secondary" 
+              size="icon" 
+              onClick={toggleFullscreen} 
+              className="absolute top-4 right-4 opacity-0 transition-opacity group-hover:opacity-100"
+              title="Exit full screen"
+            >
+              <Minimize2 className="size-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function OfficeRoom() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -119,6 +208,9 @@ export function OfficeRoom() {
   const [error, setError] = useState<string | null>(null);
   const [micOk, setMicOk] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [remoteScreenShares, setRemoteScreenShares] = useState<Map<string, RemoteTrack>>(new Map());
+  const [viewingScreenShare, setViewingScreenShare] = useState<string | null>(null);
   const [roster, setRoster] = useState<
     {
       id: string;
@@ -273,6 +365,15 @@ export function OfficeRoom() {
     });
   }, []);
 
+  const toggleScreenShare = useCallback(async () => {
+    if (!voiceRef.current) return;
+    const isCurrentlySharing = screenSharing;
+    const success = await voiceRef.current.setScreenShareEnabled(!isCurrentlySharing);
+    if (success) {
+      setScreenSharing(!isCurrentlySharing);
+    }
+  }, [screenSharing]);
+
   // Keyboard shortcuts: M = mute, Shift+M = deafen (avoids the WASD movement keys).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -318,6 +419,25 @@ export function OfficeRoom() {
     const voice = new LiveKitVoice();
     voice.onConnectedChange = (ids) => (connectedRef.current = new Set(ids));
     voice.onAudioBlocked = (blocked) => setAudioBlocked(blocked);
+    voice.onScreenShareSubscribed = (identity, track) => {
+      setRemoteScreenShares((prev) => {
+        const next = new Map(prev);
+        next.set(identity, track);
+        return next;
+      });
+      const sharerName = playersRef.current.get(identity)?.name || 'Someone';
+      toast.info(`${sharerName} is sharing their screen nearby.`, {
+        action: { label: 'View', onClick: () => setViewingScreenShare(identity) },
+      });
+    };
+    voice.onScreenShareUnsubscribed = (identity) => {
+      setRemoteScreenShares((prev) => {
+        const next = new Map(prev);
+        next.delete(identity);
+        return next;
+      });
+      setViewingScreenShare((prev) => (prev === identity ? null : prev));
+    };
     const vr = voiceRanges(office.layout);
     voice.setRanges(vr.hearing, vr.full);
     voiceRef.current = voice;
@@ -998,6 +1118,25 @@ export function OfficeRoom() {
               )}
               <span className="hidden lg:inline">{deafened ? 'Deafened' : 'Deafen'}</span>
             </button>
+            <button
+              type="button"
+              onClick={toggleScreenShare}
+              title={screenSharing ? 'Stop sharing screen' : 'Share screen'}
+              aria-pressed={screenSharing}
+              className={cn(
+                'flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                screenSharing
+                  ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90'
+                  : 'text-muted-foreground hover:bg-background hover:text-foreground',
+              )}
+            >
+              {screenSharing ? (
+                <MonitorOff className="size-[18px]" strokeWidth={1.75} />
+              ) : (
+                <Monitor className="size-[18px]" strokeWidth={1.75} />
+              )}
+              <span className="hidden lg:inline">{screenSharing ? 'Stop' : 'Share'}</span>
+            </button>
           </div>
 
           {/* Utilities */}
@@ -1583,6 +1722,8 @@ export function OfficeRoom() {
                   mutedPeers={mutedPeers}
                   onFollow={(id) => setFollowing((cur) => (cur === id ? null : id))}
                   onMute={togglePeerMute}
+                  screenShares={remoteScreenShares}
+                  onViewScreen={(id) => setViewingScreenShare(id)}
                 />
                 <PeopleGroup
                   title="Out of range"
@@ -1593,12 +1734,21 @@ export function OfficeRoom() {
                   mutedPeers={mutedPeers}
                   onFollow={(id) => setFollowing((cur) => (cur === id ? null : id))}
                   onMute={togglePeerMute}
+                  screenShares={remoteScreenShares}
+                  onViewScreen={(id) => setViewingScreenShare(id)}
                 />
               </>
             )}
           </div>
         </aside>
       </div>
+      {viewingScreenShare && remoteScreenShares.has(viewingScreenShare) && (
+        <ScreenSharePlayer
+          track={remoteScreenShares.get(viewingScreenShare)!}
+          name={playersRef.current.get(viewingScreenShare)?.name || 'Someone'}
+          onClose={() => setViewingScreenShare(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1668,6 +1818,8 @@ function PeopleGroup({
   mutedPeers,
   onFollow,
   onMute,
+  screenShares,
+  onViewScreen,
 }: {
   title: string;
   hint: string;
@@ -1677,6 +1829,8 @@ function PeopleGroup({
   mutedPeers: Set<string>;
   onFollow: (id: string) => void;
   onMute: (id: string) => void;
+  screenShares?: Map<string, RemoteTrack>;
+  onViewScreen?: (id: string) => void;
 }) {
   if (people.length === 0) return null;
   return (
@@ -1721,6 +1875,16 @@ function PeopleGroup({
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
+                {screenShares?.has(r.id) && onViewScreen && (
+                  <RowAction
+                    active={true}
+                    activeClass="bg-primary/15 text-primary"
+                    label={`View ${r.name}'s screen`}
+                    onClick={() => onViewScreen(r.id)}
+                  >
+                    <Monitor className="size-4" />
+                  </RowAction>
+                )}
                 <RowAction
                   active={isFollowing}
                   activeClass="bg-amber-500/15 text-amber-600 dark:text-amber-400"

@@ -24,22 +24,34 @@ export class LiveKitVoice {
   onConnectedChange?: (audiblePeerIds: string[]) => void;
   /** Fired when the browser blocks audio autoplay until a user gesture. */
   onAudioBlocked?: (blocked: boolean) => void;
+  
+  onScreenShareSubscribed?: (identity: string, track: RemoteTrack) => void;
+  onScreenShareUnsubscribed?: (identity: string) => void;
 
   constructor() {
     this.room = new Room({ adaptiveStream: false, dynacast: false });
 
     this.room
       .on(RoomEvent.TrackSubscribed, (track, _pub, p) => {
-        if (track.kind === Track.Kind.Audio) this.attachAudio(p.identity, track);
+        if (track.kind === Track.Kind.Audio) {
+          this.attachAudio(p.identity, track);
+        } else if (track.source === Track.Source.ScreenShare) {
+          this.onScreenShareSubscribed?.(p.identity, track);
+        }
         this.onAudioBlocked?.(!this.room.canPlaybackAudio);
         this.emitAudible();
       })
       .on(RoomEvent.TrackUnsubscribed, (track, _pub, p) => {
-        if (track.kind === Track.Kind.Audio) this.detachAudio(p.identity, track);
+        if (track.kind === Track.Kind.Audio) {
+          this.detachAudio(p.identity, track);
+        } else if (track.source === Track.Source.ScreenShare) {
+          this.onScreenShareUnsubscribed?.(p.identity);
+        }
         this.emitAudible();
       })
       .on(RoomEvent.ParticipantDisconnected, (p) => {
         this.removeAudioEl(p.identity);
+        this.onScreenShareUnsubscribed?.(p.identity);
         this.emitAudible();
       })
       .on(RoomEvent.AudioPlaybackStatusChanged, () => {
@@ -113,6 +125,19 @@ export class LiveKitVoice {
     return this.muted;
   }
 
+  async setScreenShareEnabled(enabled: boolean) {
+    if (this.connected) {
+      try {
+        await this.room.localParticipant.setScreenShareEnabled(enabled);
+        return true;
+      } catch (err) {
+        console.warn('Could not toggle screen share:', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
   /** Deafen: silence every remote participant (the next proximity tick keeps it at 0). */
   setDeafened(deafened: boolean) {
     this.deafened = deafened;
@@ -151,8 +176,10 @@ export class LiveKitVoice {
     for (const participant of this.room.remoteParticipants.values()) {
       const dist = distances.get(participant.identity);
       const within = dist !== undefined && dist <= this.hearingRange;
-      for (const pub of participant.audioTrackPublications.values()) {
-        if (pub.isSubscribed !== within) pub.setSubscribed(within);
+      for (const pub of participant.trackPublications.values()) {
+        if (pub.kind === Track.Kind.Audio || pub.source === Track.Source.ScreenShare) {
+          if (pub.isSubscribed !== within) pub.setSubscribed(within);
+        }
       }
       if (within) {
         const el = this.audioEls.get(participant.identity);
