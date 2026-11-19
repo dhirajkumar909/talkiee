@@ -58,54 +58,269 @@ export function drawFloor(
     ctx.stroke();
   }
 
-  // Draw zones first (so objects sit on top), then objects.
-  const zones = layout.items.filter((i) => ITEM_META[i.type].zone);
-  const objects = layout.items.filter((i) => !ITEM_META[i.type].zone);
+  // Layering: zones → floor décor (rugs) → furniture → connected barriers.
   const isSelected = (id: string) => opts.selectedId === id || !!opts.selectedIds?.has(id);
-  for (const item of [...zones, ...objects]) drawItem(ctx, item, isSelected(item.id));
+  const zones = layout.items.filter((i) => ITEM_META[i.type].zone);
+  const rugs = layout.items.filter((i) => i.type === 'rug');
+  const furniture = layout.items.filter(
+    (i) => !ITEM_META[i.type].zone && !ITEM_META[i.type].connects && i.type !== 'rug',
+  );
+  for (const item of zones) drawZone(ctx, item);
+  for (const item of rugs) drawRug(ctx, item);
+  for (const item of furniture) drawObject(ctx, item);
+  drawBarriers(ctx, layout);
+
+  // Selection outlines on top of everything.
+  for (const item of layout.items) if (isSelected(item.id)) drawSelection(ctx, item);
 }
 
-function drawItem(ctx: CanvasRenderingContext2D, item: LayoutItem, selected: boolean) {
+// ---------------------------------------------------------------------------
+// Items
+// ---------------------------------------------------------------------------
+
+function drawZone(ctx: CanvasRenderingContext2D, item: LayoutItem) {
   const meta = ITEM_META[item.type];
   const x = item.x * CELL;
   const y = item.y * CELL;
   const w = item.w * CELL;
   const h = item.h * CELL;
+  ctx.save();
+  ctx.fillStyle = meta.color + '40';
+  roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 10);
+  ctx.fill();
+  ctx.strokeStyle = meta.color + 'cc';
+  ctx.lineWidth = 2;
+  ctx.setLineDash(meta.audioRoom ? [] : [8, 6]);
+  roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 10);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Label pill.
+  const text = `${meta.icon} ${item.label ?? meta.label}`;
+  ctx.font = '600 12px Inter, system-ui';
+  const tw = Math.min(ctx.measureText(text).width, w - 24);
+  ctx.fillStyle = 'rgba(2,6,23,0.55)';
+  roundRect(ctx, x + 8, y + 8, tw + 14, 20, 6);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(241,245,249,0.95)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, x + 15, y + 18, w - 24);
+  if (meta.audioRoom && w >= CELL * 3) {
+    ctx.font = '500 10px Inter, system-ui';
+    ctx.fillStyle = 'rgba(226,232,240,0.6)';
+    ctx.textAlign = 'right';
+    ctx.fillText('private audio', x + w - 10, y + h - 12);
+  }
+  ctx.restore();
+}
+
+function drawRug(ctx: CanvasRenderingContext2D, item: LayoutItem) {
+  const meta = ITEM_META[item.type];
+  const x = item.x * CELL;
+  const y = item.y * CELL;
+  const w = item.w * CELL;
+  const h = item.h * CELL;
+  ctx.save();
+  ctx.fillStyle = meta.color + 'aa';
+  roundRect(ctx, x + 4, y + 4, w - 8, h - 8, 8);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(254,215,170,0.35)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  roundRect(ctx, x + 9, y + 9, w - 18, h - 18, 5);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Furniture: a raised block with a darker front face for depth, plus its icon. */
+function drawObject(ctx: CanvasRenderingContext2D, item: LayoutItem) {
+  const meta = ITEM_META[item.type];
+  const x = item.x * CELL;
+  const y = item.y * CELL;
+  const w = item.w * CELL;
+  const h = item.h * CELL;
+  const depth = meta.solid ? 5 : 3;
+  const inset = item.type === 'chair' || item.type === 'spawn' || item.type === 'speaker' ? 7 : 4;
+  ctx.save();
+  // Front face (shadowed).
+  ctx.fillStyle = meta.color;
+  roundRect(ctx, x + inset, y + inset + depth, w - inset * 2, h - inset * 2 - depth, 7);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  roundRect(ctx, x + inset, y + inset + depth, w - inset * 2, h - inset * 2 - depth, 7);
+  ctx.fill();
+  // Top face.
+  ctx.fillStyle = meta.color;
+  roundRect(ctx, x + inset, y + inset, w - inset * 2, h - inset * 2 - depth, 7);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+  ctx.lineWidth = 1;
+  roundRect(ctx, x + inset + 0.5, y + inset + 0.5, w - inset * 2 - 1, h - inset * 2 - depth - 1, 6.5);
+  ctx.stroke();
+  // Icon.
+  ctx.font = `${Math.min(w, h) * 0.45}px serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(meta.icon, x + w / 2, y + (h - depth) / 2 + 2);
+  ctx.restore();
+}
+
+function drawSelection(ctx: CanvasRenderingContext2D, item: LayoutItem) {
+  const x = item.x * CELL;
+  const y = item.y * CELL;
+  const w = item.w * CELL;
+  const h = item.h * CELL;
+  ctx.save();
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2.5;
+  roundRect(ctx, x + 1, y + 1, w - 2, h - 2, 8);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Connected barriers (walls / glass / doors)
+//
+// Connection logic: a barrier tile links to each orthogonal neighbour that is
+// also a barrier. Each family is then stroked as ONE path through the tile
+// centres with round joins, so touching tiles read as a single continuous
+// wall — corners, T-junctions and crosses come for free, with no seams.
+// ---------------------------------------------------------------------------
+
+type Barrier = 'wall' | 'glass' | 'door';
+type Tile = { cx: number; cy: number; type: Barrier };
+
+const DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+] as const;
+
+function barrierMap(layout: OfficeLayout): Map<string, Barrier> {
+  const map = new Map<string, Barrier>();
+  for (const it of layout.items) {
+    if (!ITEM_META[it.type].connects) continue;
+    for (let cx = it.x; cx < it.x + it.w; cx++)
+      for (let cy = it.y; cy < it.y + it.h; cy++) map.set(`${cx},${cy}`, it.type as Barrier);
+  }
+  return map;
+}
+
+/**
+ * Build the path for one barrier family. Links to a tile of the same family go
+ * centre→centre (added once per pair); links to a different barrier (wall↔door,
+ * wall↔glass) stop at the shared edge so each family owns its half.
+ */
+function familyPath(tiles: Tile[], map: Map<string, Barrier>, family: Barrier): Path2D {
+  const path = new Path2D();
+  for (const t of tiles) {
+    if (t.type !== family) continue;
+    const mx = (t.cx + 0.5) * CELL;
+    const my = (t.cy + 0.5) * CELL;
+    let linked = false;
+    for (const [dx, dy] of DIRS) {
+      const n = map.get(`${t.cx + dx},${t.cy + dy}`);
+      if (!n) continue;
+      linked = true;
+      if (n === family) {
+        if (dx < 0 || dy < 0) continue; // the neighbour draws this shared link
+        path.moveTo(mx, my);
+        path.lineTo(mx + dx * CELL, my + dy * CELL);
+      } else {
+        path.moveTo(mx, my);
+        path.lineTo(mx + (dx * CELL) / 2, my + (dy * CELL) / 2);
+      }
+    }
+    if (!linked) {
+      // A lone tile: a short stub so the round caps render it as a pill/post.
+      path.moveTo(mx - 0.01, my);
+      path.lineTo(mx + 0.01, my);
+    }
+  }
+  return path;
+}
+
+function drawBarriers(ctx: CanvasRenderingContext2D, layout: OfficeLayout) {
+  const map = barrierMap(layout);
+  if (map.size === 0) return;
+  const tiles: Tile[] = [...map.entries()].map(([k, type]) => {
+    const [cx, cy] = k.split(',').map(Number);
+    return { cx, cy, type };
+  });
 
   ctx.save();
-  if (meta.zone) {
-    // Translucent area with a dashed border + label.
-    ctx.fillStyle = meta.color + '55';
-    roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 10);
-    ctx.fill();
-    ctx.strokeStyle = meta.color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([8, 6]);
-    roundRect(ctx, x + 2, y + 2, w - 4, h - 4, 10);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(226,232,240,0.9)';
-    ctx.font = '600 13px Inter, system-ui';
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`${meta.icon} ${item.label ?? meta.label}`, x + 10, y + 10);
-  } else {
-    ctx.fillStyle = meta.color;
-    roundRect(ctx, x + 3, y + 3, w - 6, h - 6, 6);
-    ctx.fill();
-    // Icon centered.
-    ctx.font = `${Math.min(w, h) * 0.5}px serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(meta.icon, x + w / 2, y + h / 2 + 2);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // Doors sit under the wall ends so the wall caps act as door frames.
+  for (const t of tiles) {
+    if (t.type !== 'door') continue;
+    const has = (dx: number, dy: number) => map.has(`${t.cx + dx},${t.cy + dy}`);
+    drawDoor(ctx, t.cx, t.cy, has(-1, 0) || has(1, 0) || !(has(0, -1) || has(0, 1)));
   }
 
-  if (selected) {
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2.5;
-    roundRect(ctx, x + 1, y + 1, w - 2, h - 2, 8);
-    ctx.stroke();
-  }
+  // Glass: a soft tinted pane with a crisp highlight line through it.
+  const glass = familyPath(tiles, map, 'glass');
+  ctx.strokeStyle = 'rgba(34,211,238,0.22)';
+  ctx.lineWidth = 12;
+  ctx.stroke(glass);
+  ctx.strokeStyle = 'rgba(165,243,252,0.95)';
+  ctx.lineWidth = 2;
+  ctx.stroke(glass);
+
+  // Walls: soft drop shadow, a solid body, then a fine inner rule.
+  const walls = familyPath(tiles, map, 'wall');
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.55)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetY = 3;
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 14;
+  ctx.stroke(walls);
+  ctx.restore();
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth = 10;
+  ctx.stroke(walls);
+  ctx.strokeStyle = 'rgba(100,116,139,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke(walls);
+
+  ctx.restore();
+}
+
+/** A doorway: one leaf swung open with its sweep arc, aligned to the wall run. */
+function drawDoor(ctx: CanvasRenderingContext2D, cx: number, cy: number, horizontal: boolean) {
+  const x = cx * CELL;
+  const y = cy * CELL;
+  const inset = 7; // where the wall caps end
+  const span = CELL - inset * 2;
+  ctx.save();
+  ctx.translate(x + CELL / 2, y + CELL / 2);
+  if (!horizontal) ctx.rotate(Math.PI / 2);
+  // Sweep area.
+  ctx.beginPath();
+  ctx.moveTo(-CELL / 2 + inset, 0);
+  ctx.arc(-CELL / 2 + inset, 0, span, -Math.PI / 2, 0);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(251,191,36,0.08)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(251,191,36,0.45)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.arc(-CELL / 2 + inset, 0, span, -Math.PI / 2, 0);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  // Leaf.
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 3;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(-CELL / 2 + inset, 0);
+  ctx.lineTo(-CELL / 2 + inset, -span);
+  ctx.stroke();
   ctx.restore();
 }
 

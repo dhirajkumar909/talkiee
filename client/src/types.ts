@@ -49,7 +49,12 @@ export type ItemType =
   | 'rug'
   | 'door'
   | 'spawn'
-  | 'speaker';
+  | 'speaker'
+  | 'glass'
+  | 'shelf'
+  | 'whiteboard'
+  | 'coffee'
+  | 'booth';
 
 export interface LayoutItem {
   id: string;
