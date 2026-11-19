@@ -1,4 +1,4 @@
-import type { LayoutItem, OfficeLayout, PresenceState } from '../types';
+import type { LayoutItem, OfficeLayout, PresenceState, ReactionPayload } from '../types';
 import { CELL, AVATAR_RADIUS, HEARING_RANGE, ITEM_META, speakerRanges } from './layout';
 
 /** Highlight the audio room the viewer is currently standing in. */
@@ -575,4 +575,66 @@ export function roundRect(
   ctx.arcTo(x, y + h, x, y, rr);
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
+}
+
+
+export function drawReactions(
+  ctx: CanvasRenderingContext2D,
+  players: Map<string, PresenceState>,
+  reactions: ReactionPayload[],
+  now: number
+) {
+  // Reaction duration in ms
+  const DURATION = 2000;
+  // Distance to float up (in pixels)
+  const FLOAT_DIST = 60;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  
+  for (const r of reactions) {
+    const p = players.get(r.userId);
+    if (!p) continue;
+    
+    const elapsed = now - r.timestamp;
+    if (elapsed > DURATION) continue;
+
+    const progress = elapsed / DURATION;
+    
+    // Fade in quickly, then fade out
+    let alpha = 1;
+    if (progress < 0.1) alpha = progress / 0.1;
+    else if (progress > 0.7) alpha = 1 - (progress - 0.7) / 0.3;
+
+    // Float upwards over time
+    const yOffset = -progress * FLOAT_DIST;
+
+    const px = p.rx ?? p.x;
+    const py = (p.ry ?? p.y) + yOffset;
+
+    ctx.globalAlpha = alpha;
+    
+    // Small popping animation at the start
+    const scale = progress < 0.1 ? 0.5 + (progress / 0.1) * 0.5 : 1;
+    
+    ctx.save();
+    // Center transformation on the emoji position to scale properly
+    ctx.translate(px, py);
+    ctx.scale(scale, scale);
+    
+    // Emoji size and cross-browser font stack (Chrome sometimes needs explicit emoji fonts on canvas)
+    ctx.font = '28px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'; 
+    
+    // Add a slight drop shadow for visibility over various backgrounds
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 2;
+    
+    ctx.fillText(r.emoji, 0, -30); // Slightly above the avatar head
+    ctx.restore();
+  }
+  
+  ctx.restore();
 }

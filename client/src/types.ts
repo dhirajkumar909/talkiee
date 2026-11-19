@@ -120,6 +120,13 @@ export interface SignalPayload {
   data: unknown;
 }
 
+/** Broadcast when a user reacts with an emoji. */
+export interface ReactionPayload {
+  userId: string;
+  emoji: string;
+  timestamp: number;
+}
+
 /**
  * "Now playing" state for ONE speaker, broadcast over the realtime channel.
  * Every speaker has its own channel: when `playing` is true, every client plays

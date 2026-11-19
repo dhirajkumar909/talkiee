@@ -1,6 +1,6 @@
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import type { MovePayload, MusicState, PresenceState, SignalPayload, StatusPayload } from '../types';
+import type { MovePayload, MusicState, PresenceState, SignalPayload, StatusPayload, ReactionPayload } from '../types';
 
 export interface OfficeChannelHandlers {
   /** Full roster from presence state (join/leave/position sync). */
@@ -13,6 +13,8 @@ export interface OfficeChannelHandlers {
   onMusic: (state: MusicState) => void;
   /** A peer toggled their own mic-mute / deafen. */
   onStatus: (status: StatusPayload) => void;
+  /** A peer reacted with an emoji. */
+  onReaction?: (reaction: ReactionPayload) => void;
   /** Another member joined the office. */
   onJoin?: (user: PresenceState) => void;
   /** Another member left the office. */
@@ -123,6 +125,9 @@ export class OfficeChannel {
       })
       .on('broadcast', { event: 'status' }, ({ payload }) => {
         handlers.onStatus(payload as StatusPayload);
+      })
+      .on('broadcast', { event: 'reaction' }, ({ payload }) => {
+        handlers.onReaction?.(payload as ReactionPayload);
       });
   }
 
@@ -180,6 +185,14 @@ export class OfficeChannel {
       type: 'broadcast',
       event: 'signal',
       payload: { to, from: this.me.userId, data } satisfies SignalPayload,
+    });
+  }
+
+  sendReaction(emoji: string) {
+    void this.channel.send({
+      type: 'broadcast',
+      event: 'reaction',
+      payload: { userId: this.me.userId, emoji, timestamp: Date.now() } satisfies ReactionPayload,
     });
   }
 

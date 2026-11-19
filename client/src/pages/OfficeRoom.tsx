@@ -34,7 +34,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { getOffice, getLivekitToken } from '../lib/api';
-import type { MusicState, Office, PresenceState } from '../types';
+import type { MusicState, Office, PresenceState, ReactionPayload } from '../types';
 import { OfficeChannel } from '../office/realtime';
 import {
   isNotificationSupported,
@@ -52,6 +52,7 @@ import {
   drawAvatars,
   drawSpeakerPulses,
   highlightRoom,
+  drawReactions,
 } from '../office/render';
 import {
   AVATAR_RADIUS,
@@ -268,6 +269,7 @@ export function OfficeRoom() {
   const lastFrame = useRef(0);
   const micOkRef = useRef(false);
   const deafenedRef = useRef(false);
+  const reactionsRef = useRef<ReactionPayload[]>([]);
   /** Speakers currently playing (read by the render loop for pulses). */
   const playingSpeakersRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -519,6 +521,9 @@ export function OfficeRoom() {
           p.muted = m;
           p.deafened = d;
         }
+      },
+      onReaction: (r) => {
+        reactionsRef.current.push(r);
       },
     });
     channelRef.current = channel;
@@ -787,8 +792,23 @@ export function OfficeRoom() {
   // Keyboard.
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
       keysRef.current.add(e.key.toLowerCase());
+
+      let key = e.key;
+      if (e.code === 'Digit1' || e.code === 'Numpad1') key = '1';
+      if (e.code === 'Digit2' || e.code === 'Numpad2') key = '2';
+      if (e.code === 'Digit3' || e.code === 'Numpad3') key = '3';
+
+      if (['1', '2', '3'].includes(key)) {
+        const emojis = { '1': '❤️', '2': '👍', '3': '😂' };
+        const emoji = emojis[key as keyof typeof emojis];
+        channelRef.current?.sendReaction(emoji);
+        if (profile?.id) {
+          reactionsRef.current.push({ userId: profile.id, emoji, timestamp: Date.now() });
+        }
+      }
     };
     const up = (e: KeyboardEvent) => keysRef.current.delete(e.key.toLowerCase());
     const blur = () => keysRef.current.clear();
@@ -800,7 +820,7 @@ export function OfficeRoom() {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', blur);
     };
-  }, []);
+  }, [profile?.id]);
 
   // Proximity + roster refresh (every 250ms). Presence is tracked once on
   // join — never on a timer — because repeated track() drops the channel.
@@ -1030,6 +1050,10 @@ export function OfficeRoom() {
           followingRef.current,
           voiceRanges(layout).hearing,
         );
+
+        const currentMs = Date.now();
+        reactionsRef.current = reactionsRef.current.filter((r) => currentMs - r.timestamp < 3000);
+        drawReactions(ctx, playersRef.current, reactionsRef.current, currentMs);
       }
       raf = requestAnimationFrame(tick);
     };
