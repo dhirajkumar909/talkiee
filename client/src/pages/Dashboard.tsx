@@ -19,6 +19,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { MembersDialog } from '../components/MembersDialog';
 import {
   Dialog,
   DialogContent,
@@ -33,13 +34,14 @@ type Invite = Awaited<ReturnType<typeof listMyInvites>>[number];
 export function Dashboard() {
   const { profile } = useAuth();
   const navigate = useNavigate();
-  const [offices, setOffices] = useState<Office[]>([]);
+  const [offices, setOffices] = useState<(Office & { myRole: string })[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
+    if (!profile) return;
     try {
-      const [o, i] = await Promise.all([listMyOffices(), listMyInvites()]);
+      const [o, i] = await Promise.all([listMyOffices(profile.id), listMyInvites()]);
       setOffices(o);
       setInvites(i);
     } catch (err) {
@@ -51,7 +53,7 @@ export function Dashboard() {
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, [profile]);
 
   const onAccept = async (id: string) => {
     await acceptInvite(id);
@@ -120,38 +122,46 @@ export function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 items-start">
             {offices.map((office) => {
               const isOwner = office.owner_id === profile?.id;
+              const isAdmin = office.myRole === 'admin';
+              const canInvite = isOwner || isAdmin;
+              const displayRole = office.myRole.charAt(0).toUpperCase() + office.myRole.slice(1);
               return (
                 <Card key={office.id} className="flex flex-col">
                   <CardHeader>
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle>{office.name}</CardTitle>
-                      <Badge variant={isOwner ? 'default' : 'secondary'}>
-                        {isOwner ? 'Owner' : 'Member'}
+                      <Badge variant={isOwner ? 'default' : isAdmin ? 'outline' : 'secondary'}>
+                        {displayRole}
                       </Badge>
                     </div>
                   </CardHeader>
-                  <CardContent className="mt-auto flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => navigate(`/office/${office.id}`)}>
-                      <DoorOpen /> Enter
-                    </Button>
+                  <CardContent className="flex flex-col gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => navigate(`/office/${office.id}`)}>
+                        <DoorOpen /> Enter
+                      </Button>
+                      {canInvite && (
+                        <InviteDialog officeId={office.id} officeName={office.name} />
+                      )}
+                    </div>
                     {isOwner && (
-                      <>
+                      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/50">
+                        <MembersDialog officeId={office.id} officeName={office.name} />
                         <Button size="sm" variant="outline" onClick={() => navigate(`/office/${office.id}/edit`)}>
                           <Pencil /> Edit
                         </Button>
-                        <InviteDialog officeId={office.id} officeName={office.name} />
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-destructive hover:text-destructive"
+                          className="ml-auto text-destructive hover:bg-destructive/10 hover:text-destructive"
                           onClick={() => onDelete(office)}
                         >
                           <Trash2 />
                         </Button>
-                      </>
+                      </div>
                     )}
                   </CardContent>
                 </Card>

@@ -36,7 +36,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
-import { getOffice, getLivekitToken } from '../lib/api';
+import { getOffice, getLivekitToken, getMyRole } from '../lib/api';
 import type { MusicState, Office, PresenceState, ReactionPayload, ChatMessagePayload } from '../types';
 import { OfficeChannel } from '../office/realtime';
 import {
@@ -228,6 +228,7 @@ export function OfficeRoom() {
   const [chatInput, setChatInput] = useState('');
   const [viewingScreenShare, setViewingScreenShare] = useState<string | null>(null);
   const [roster, setRoster] = useState<RosterPerson[]>([]);
+  const [myRole, setMyRole] = useState<string>('member');
   const [inRoom, setInRoom] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [deafened, setDeafened] = useState(false);
@@ -425,14 +426,15 @@ export function OfficeRoom() {
 
   // Load the office record.
   useEffect(() => {
-    if (!id) return;
+    if (!id || !profile) return;
     getOffice(id)
       .then((o) => {
         setOffice(o);
         officeRef.current = o;
+        getMyRole(id, profile.id).then(setMyRole).catch(() => {});
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Could not open office'));
-  }, [id]);
+  }, [id, profile]);
 
   // Set up realtime + voice exactly once, when office + profile are ready.
   // Gating on this one-shot boolean (not the office/profile objects) prevents
@@ -1666,7 +1668,9 @@ export function OfficeRoom() {
                 </button>
               </div>
               <div className="-mr-1.5 -mt-1 flex shrink-0 items-center gap-2">
-              <InviteDialog officeId={office.id} officeName={office.name} />
+              {(myRole === 'owner' || myRole === 'admin') && (
+                <InviteDialog officeId={office.id} officeName={office.name} />
+              )}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button

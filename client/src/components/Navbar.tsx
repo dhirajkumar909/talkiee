@@ -84,7 +84,7 @@ export function Navbar() {
                   <User className="text-muted-foreground" /> Edit profile
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/dashboard')}>
+                <DropdownMenuItem onClick={() => navigate('/dashboard', {replace: true})}>
                   <LayoutGrid className="text-muted-foreground" /> Your offices
                 </DropdownMenuItem>
                 {canInstall && (
@@ -97,7 +97,7 @@ export function Navbar() {
                   className="text-destructive focus:bg-destructive/10 focus:text-destructive"
                   onClick={async () => {
                     await signOut();
-                    navigate('/');
+                    navigate('/', {replace: true});
                   }}
                 >
                   <LogOut /> Sign out

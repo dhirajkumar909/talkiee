@@ -56,6 +56,12 @@ returns boolean language sql security definer set search_path = public stable as
   select exists (select 1 from public.offices o where o.id = oid and o.owner_id = uid);
 $$;
 
+create or replace function public.is_office_owner_or_admin(oid uuid, uid uuid)
+returns boolean language sql security definer set search_path = public stable as $$
+  select exists (select 1 from public.offices o where o.id = oid and o.owner_id = uid)
+  or exists (select 1 from public.office_members m where m.office_id = oid and m.user_id = uid and m.role = 'admin');
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Triggers: create a profile on signup; add owner as a member on office create
 -- ---------------------------------------------------------------------------
@@ -169,6 +175,11 @@ drop policy if exists members_insert on public.office_members;
 create policy members_insert on public.office_members
   for insert to authenticated with check (public.is_office_owner(office_id, auth.uid()));
 
+drop policy if exists members_update on public.office_members;
+create policy members_update on public.office_members
+  for update to authenticated using (public.is_office_owner(office_id, auth.uid()))
+  with check (public.is_office_owner(office_id, auth.uid()));
+
 drop policy if exists members_delete on public.office_members;
 create policy members_delete on public.office_members
   for delete to authenticated
@@ -178,12 +189,12 @@ create policy members_delete on public.office_members
 drop policy if exists invites_select on public.office_invites;
 create policy invites_select on public.office_invites
   for select to authenticated
-  using (invitee_id = auth.uid() or public.is_office_owner(office_id, auth.uid()));
+  using (invitee_id = auth.uid() or public.is_office_owner_or_admin(office_id, auth.uid()));
 
 drop policy if exists invites_insert on public.office_invites;
 create policy invites_insert on public.office_invites
   for insert to authenticated
-  with check (inviter_id = auth.uid() and public.is_office_owner(office_id, auth.uid()));
+  with check (inviter_id = auth.uid() and public.is_office_owner_or_admin(office_id, auth.uid()));
 
 drop policy if exists invites_delete on public.office_invites;
 create policy invites_delete on public.office_invites
@@ -196,14 +207,17 @@ insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do nothing;
 
+drop policy if exists "Avatars are publicly accessible." on storage.objects;
 create policy "Avatars are publicly accessible."
   on storage.objects for select
   using ( bucket_id = 'avatars' );
 
+drop policy if exists "Users can upload their own avatar." on storage.objects;
 create policy "Users can upload their own avatar."
   on storage.objects for insert
   with check ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
 
+drop policy if exists "Users can update their own avatar." on storage.objects;
 create policy "Users can update their own avatar."
   on storage.objects for update
   using ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
