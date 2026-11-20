@@ -12,6 +12,7 @@ create table if not exists public.profiles (
   username    text unique not null,
   display_name text not null,
   color       text not null default '#4f46e5',
+  avatar_url  text,
   created_at  timestamptz not null default now()
 );
 
@@ -187,3 +188,23 @@ create policy invites_insert on public.office_invites
 drop policy if exists invites_delete on public.office_invites;
 create policy invites_delete on public.office_invites
   for delete to authenticated using (public.is_office_owner(office_id, auth.uid()));
+
+-- ---------------------------------------------------------------------------
+-- Storage setup for avatars
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public) 
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+create policy "Avatars are publicly accessible."
+  on storage.objects for select
+  using ( bucket_id = 'avatars' );
+
+create policy "Users can upload their own avatar."
+  on storage.objects for insert
+  with check ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
+
+create policy "Users can update their own avatar."
+  on storage.objects for update
+  using ( bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1] );
+

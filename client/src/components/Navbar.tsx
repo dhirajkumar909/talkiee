@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, Download, LayoutGrid, LogOut } from 'lucide-react';
+import { ChevronDown, Download, LayoutGrid, LogOut, User } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { Avatar } from './ui/avatar';
 import { Button } from './ui/button';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { usePWAInstall } from '../lib/pwa';
+import { ProfileDialog } from './ProfileDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +20,7 @@ export function Navbar() {
   const { profile, signOut } = useAuth();
   const navigate = useNavigate();
   const { canInstall, install } = usePWAInstall();
+  const [profileOpen, setProfileOpen] = useState(false);
 
   return (
     <header className="sticky top-0 z-30 border-b bg-background">
@@ -53,6 +56,7 @@ export function Navbar() {
                 <Avatar
                   name={profile.display_name}
                   color={profile.color}
+                  src={profile.avatar_url ?? undefined}
                   className="size-7 text-[11px] ring-0"
                 />
                 <span className="hidden max-w-[10rem] truncate text-sm font-medium sm:block">
@@ -65,6 +69,7 @@ export function Navbar() {
                   <Avatar
                     name={profile.display_name}
                     color={profile.color}
+                    src={profile.avatar_url ?? undefined}
                     className="size-9 shrink-0 ring-0"
                   />
                   <div className="min-w-0">
@@ -74,6 +79,10 @@ export function Navbar() {
                     </p>
                   </div>
                 </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setProfileOpen(true)}>
+                  <User className="text-muted-foreground" /> Edit profile
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => navigate('/dashboard')}>
                   <LayoutGrid className="text-muted-foreground" /> Your offices
@@ -95,6 +104,7 @@ export function Navbar() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
           </>
         )}
       </div>

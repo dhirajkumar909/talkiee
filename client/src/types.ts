@@ -7,6 +7,7 @@ export interface Profile {
   username: string;
   display_name: string;
   color: string;
+  avatar_url?: string | null;
   created_at: string;
 }
 
@@ -88,6 +89,7 @@ export interface PresenceState {
   userId: string;
   name: string;
   color: string;
+  avatar_url?: string | null;
   x: number;
   y: number;
   /** Smoothed on-screen position (interpolates toward x/y); set by the renderer. */

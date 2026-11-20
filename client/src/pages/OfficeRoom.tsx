@@ -446,6 +446,7 @@ export function OfficeRoom() {
       userId: profile.id,
       name: profile.display_name,
       color: profile.color,
+      avatar_url: profile.avatar_url,
       x: spawn.x,
       y: spawn.y,
     };
@@ -923,6 +924,7 @@ export function OfficeRoom() {
             id: p.userId,
             name: p.userId === profile.id ? `${p.name} (you)` : p.name,
             color: p.color,
+            avatar_url: p.avatar_url,
             zone: zoneLabelAt(layout, p.x, p.y),
             connected: connected.has(p.userId),
             muted: !!p.muted,
@@ -1929,6 +1931,7 @@ type RosterPerson = {
   id: string;
   name: string;
   color: string;
+  avatar_url?: string | null;
   zone: string;
   connected: boolean;
   muted: boolean;
@@ -1971,6 +1974,7 @@ function PersonAvatar({
       <Avatar
         name={stripYou(person.name)}
         color={person.color}
+        src={person.avatar_url ?? undefined}
         className={cn(size === 'lg' ? 'size-11 text-sm' : 'size-9', isLive && 'ring-2 ring-emerald-500/70 ring-offset-2 ring-offset-background')}
       />
       {(person.muted || person.deafened || person.dnd) && (

@@ -62,6 +62,23 @@ export async function findProfileByUsername(username: string): Promise<Profile |
   return (data as Profile) ?? null;
 }
 
+export async function updateProfile(id: string, updates: Partial<Profile>) {
+  const { error } = await supabase.from('profiles').update(updates).eq('id', id);
+  if (error) throw error;
+}
+
+export async function uploadAvatar(userId: string, file: File): Promise<string> {
+  const ext = file.name.split('.').pop() || 'png';
+  const path = `${userId}/${Date.now()}.${ext}`;
+  const { error } = await supabase.storage.from('avatars').upload(path, file, {
+    cacheControl: '3600',
+    upsert: false,
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+  return data.publicUrl;
+}
+
 export async function inviteToOffice(officeId: string, inviterId: string, inviteeId: string) {
   const { error } = await supabase
     .from('office_invites')

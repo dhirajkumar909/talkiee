@@ -1,6 +1,18 @@
 import type { LayoutItem, OfficeLayout, PresenceState, ReactionPayload } from '../types';
 import { CELL, AVATAR_RADIUS, HEARING_RANGE, ITEM_META, speakerRanges } from './layout';
 
+const avatarImageCache = new Map<string, HTMLImageElement>();
+function getAvatarImage(url: string | null | undefined): HTMLImageElement | null {
+  if (!url) return null;
+  if (avatarImageCache.has(url)) return avatarImageCache.get(url)!;
+  
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.src = url;
+  avatarImageCache.set(url, img);
+  return img;
+}
+
 /** Highlight the audio room the viewer is currently standing in. */
 export function highlightRoom(ctx: CanvasRenderingContext2D, room: LayoutItem) {
   const x = room.x * CELL;
@@ -487,8 +499,25 @@ export function drawAvatars(
 
     ctx.beginPath();
     ctx.arc(x, y, AVATAR_RADIUS, 0, Math.PI * 2);
-    ctx.fillStyle = p.color;
-    ctx.fill();
+    
+    const avatarImg = getAvatarImage(p.avatar_url);
+    if (avatarImg && avatarImg.complete && avatarImg.naturalWidth > 0) {
+      ctx.save();
+      ctx.clip(); // clip to the circle
+      ctx.drawImage(avatarImg, x - AVATAR_RADIUS, y - AVATAR_RADIUS, AVATAR_RADIUS * 2, AVATAR_RADIUS * 2);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.fill();
+      // Draw initials if no image
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px Inter, system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const initials = p.name.split(/\s+/).map((n) => n[0]).slice(0, 2).join('').toUpperCase();
+      ctx.fillText(initials || '?', x, y + 1);
+    }
+    
     ctx.lineWidth = isSelf ? 3.5 : 2;
     ctx.strokeStyle = isSelf ? '#ffffff' : 'rgba(255,255,255,0.45)';
     ctx.stroke();
