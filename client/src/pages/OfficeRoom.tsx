@@ -77,6 +77,7 @@ import { Avatar } from '../components/ui/avatar';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 import { Joystick } from '../components/Joystick';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { InviteDialog } from '../components/InviteDialog';
 import { cn } from '../lib/utils';
 
 /** How close (px) to trail behind someone you're following. */
@@ -1632,7 +1633,8 @@ export function OfficeRoom() {
                   Chat
                 </button>
               </div>
-              <div className="-mr-1.5 -mt-1 flex shrink-0 items-center gap-0.5">
+              <div className="-mr-1.5 -mt-1 flex shrink-0 items-center gap-2">
+              <InviteDialog officeId={office.id} officeName={office.name} />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
