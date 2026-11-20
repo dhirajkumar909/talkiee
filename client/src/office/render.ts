@@ -493,6 +493,27 @@ export function drawAvatars(
     ctx.strokeStyle = isSelf ? '#ffffff' : 'rgba(255,255,255,0.45)';
     ctx.stroke();
 
+    // DND strict badge directly on the canvas avatar (red circle with white minus)
+    if (p.dnd) {
+      const badgeX = x + AVATAR_RADIUS * 0.7;
+      const badgeY = y - AVATAR_RADIUS * 0.7;
+      
+      ctx.beginPath();
+      ctx.arc(badgeX, badgeY, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#ef4444'; // Red-500
+      ctx.fill();
+      ctx.strokeStyle = '#18181b'; // zinc-900 border
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.moveTo(badgeX - 3, badgeY);
+      ctx.lineTo(badgeX + 3, badgeY);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
     ctx.font = isSelf ? '600 13px Inter, system-ui' : '12px Inter, system-ui';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';

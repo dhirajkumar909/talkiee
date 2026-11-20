@@ -31,6 +31,7 @@ import {
   Volume2,
   VolumeX,
   MessageCircle,
+  MinusCircle,
   Send,
   X,
 } from 'lucide-react';
@@ -226,20 +227,11 @@ export function OfficeRoom() {
   }, [messages, activeTab]);
   const [chatInput, setChatInput] = useState('');
   const [viewingScreenShare, setViewingScreenShare] = useState<string | null>(null);
-  const [roster, setRoster] = useState<
-    {
-      id: string;
-      name: string;
-      color: string;
-      zone: string;
-      connected: boolean;
-      muted: boolean;
-      deafened: boolean;
-    }[]
-  >([]);
+  const [roster, setRoster] = useState<RosterPerson[]>([]);
   const [inRoom, setInRoom] = useState<string | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [deafened, setDeafened] = useState(false);
+  const [dnd, setDnd] = useState(false);
   const [showRoster, setShowRoster] = useState(false);
   const [musicBySpeaker, setMusicBySpeaker] = useState<SpeakerMusic>({});
   /** YouTube titles resolved locally, per speaker. */
@@ -282,6 +274,7 @@ export function OfficeRoom() {
   const lastFrame = useRef(0);
   const micOkRef = useRef(false);
   const deafenedRef = useRef(false);
+  const dndRef = useRef(false);
   const reactionsRef = useRef<ReactionPayload[]>([]);
   /** Speakers currently playing (read by the render loop for pulses). */
   const playingSpeakersRef = useRef<Set<string>>(new Set());
@@ -311,6 +304,9 @@ export function OfficeRoom() {
   useEffect(() => {
     deafenedRef.current = deafened;
   }, [deafened]);
+  useEffect(() => {
+    dndRef.current = dnd;
+  }, [dnd]);
 
   const [notifyPerm, setNotifyPerm] = useState<NotificationPermission>(() => getNotificationPermission());
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
@@ -367,16 +363,32 @@ export function OfficeRoom() {
   // Toggle mic mute. Deafen couples the mic (deafen → mute, undeafen → unmute
   // if a mic is available), mirroring Discord. Effects below sync the voice layer.
   const toggleMute = useCallback(() => {
-    if (deafenedRef.current || !micOkRef.current) return;
+    if (deafenedRef.current || dndRef.current || !micOkRef.current) return;
     void voiceRef.current?.resumeAudio();
     setMuted((m) => !m);
   }, []);
 
   const toggleDeafen = useCallback(() => {
+    if (dndRef.current) return;
     void voiceRef.current?.resumeAudio();
     setDeafened((d) => {
       const next = !d;
       setMuted(next ? true : !micOkRef.current);
+      return next;
+    });
+  }, []);
+
+  const toggleDnd = useCallback(() => {
+    void voiceRef.current?.resumeAudio();
+    setDnd((d) => {
+      const next = !d;
+      if (next) {
+        setDeafened(true);
+        setMuted(true);
+      } else {
+        setDeafened(false);
+        setMuted(!micOkRef.current);
+      }
       return next;
     });
   }, []);
@@ -528,11 +540,12 @@ export function OfficeRoom() {
         musicReceivedRef.current.add(state.speakerId);
         applyMusic(state);
       },
-      onStatus: ({ userId, muted: m, deafened: d }) => {
+      onStatus: ({ userId, muted: m, deafened: d, dnd }) => {
         const p = playersRef.current.get(userId);
         if (p) {
           p.muted = m;
           p.deafened = d;
+          p.dnd = dnd;
         }
       },
       onReaction: (r) => {
@@ -588,16 +601,17 @@ export function OfficeRoom() {
     voiceRef.current?.setMutedPeers(mutedPeers);
   }, [mutedPeers]);
 
-  // Broadcast our own mute/deafen so others see it on our avatar + roster, and
+  // Broadcast our own mute/deafen/dnd so others see it on our avatar + roster, and
   // reflect it on our own local entry too.
   useEffect(() => {
     const me = profile ? playersRef.current.get(profile.id) : undefined;
     if (me) {
       me.muted = muted;
       me.deafened = deafened;
+      me.dnd = dnd;
     }
-    channelRef.current?.sendStatus(muted, deafened);
-  }, [muted, deafened, ready, profile]);
+    channelRef.current?.sendStatus(muted, deafened, dnd);
+  }, [muted, deafened, dnd, ready, profile]);
 
   // Mute or unmute another person's voice — just for yourself.
   const togglePeerMute = useCallback((userId: string) => {
@@ -913,6 +927,7 @@ export function OfficeRoom() {
             connected: connected.has(p.userId),
             muted: !!p.muted,
             deafened: !!p.deafened,
+            dnd: !!p.dnd,
           })),
       );
     }, 250);
@@ -1190,6 +1205,21 @@ export function OfficeRoom() {
                 <Headphones className="size-[18px]" strokeWidth={1.75} />
               )}
               <span className="hidden lg:inline">{deafened ? 'Deafened' : 'Deafen'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={toggleDnd}
+              title={dnd ? 'Turn off Do Not Disturb' : 'Do Not Disturb — mute, deafen, and show focus bubble'}
+              aria-pressed={dnd}
+              className={cn(
+                'flex h-9 items-center gap-2 rounded-lg px-2.5 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                dnd
+                  ? 'bg-amber-500 text-amber-950 shadow-sm hover:bg-amber-500/90'
+                  : 'text-muted-foreground hover:bg-background hover:text-foreground',
+              )}
+            >
+              <MinusCircle className="size-[18px]" strokeWidth={1.75} />
+              <span className="hidden lg:inline">DND</span>
             </button>
             <button
               type="button"
@@ -1758,21 +1788,25 @@ export function OfficeRoom() {
                     <span
                       className={cn(
                         'inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold',
-                        deafened
+                        dnd
+                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                          : deafened
                           ? 'bg-destructive/15 text-destructive'
                           : muted
                           ? 'bg-muted text-muted-foreground'
                           : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
                       )}
                     >
-                      {deafened ? (
+                      {dnd ? (
+                        <MinusCircle className="size-3" />
+                      ) : deafened ? (
                         <HeadphoneOff className="size-3" />
                       ) : muted ? (
                         <MicOff className="size-3" />
                       ) : (
                         <Mic className="size-3" />
                       )}
-                      {deafened ? 'Deafened' : muted ? 'Muted' : 'Live'}
+                      {dnd ? 'Focusing' : deafened ? 'Deafened' : muted ? 'Muted' : 'Live'}
                     </span>
                   </div>
                 </div>
@@ -1899,6 +1933,7 @@ type RosterPerson = {
   connected: boolean;
   muted: boolean;
   deafened: boolean;
+  dnd: boolean;
 };
 
 const stripYou = (name: string) => name.replace(/ \(you\)$/, '');
@@ -1938,9 +1973,12 @@ function PersonAvatar({
         color={person.color}
         className={cn(size === 'lg' ? 'size-11 text-sm' : 'size-9', isLive && 'ring-2 ring-emerald-500/70 ring-offset-2 ring-offset-background')}
       />
-      {(person.muted || person.deafened) && (
-        <span className="absolute -bottom-0.5 -right-0.5 grid size-4 place-items-center rounded-full border-2 border-background bg-muted text-muted-foreground">
-          {person.deafened ? <HeadphoneOff className="size-2.5" /> : <MicOff className="size-2.5" />}
+      {(person.muted || person.deafened || person.dnd) && (
+        <span className={cn(
+          "absolute -bottom-0.5 -right-0.5 grid size-4 place-items-center rounded-full border-2 border-background",
+          person.dnd ? "bg-amber-500 text-amber-950" : "bg-muted text-muted-foreground"
+        )}>
+          {person.dnd ? <MinusCircle className="size-2.5" /> : person.deafened ? <HeadphoneOff className="size-2.5" /> : <MicOff className="size-2.5" />}
         </span>
       )}
     </span>

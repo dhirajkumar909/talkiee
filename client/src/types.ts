@@ -97,15 +97,18 @@ export interface PresenceState {
   muted?: boolean;
   /** They've deafened themselves? (broadcast; shown on their avatar) */
   deafened?: boolean;
+  /** They are in Do Not Disturb mode? (broadcast; visual bubble) */
+  dnd?: boolean;
   /** Accumulated distance walked on-screen (used for footstep sfx). */
   distWalked?: number;
 }
 
-/** Broadcast when a user toggles their own mic-mute / deafen. */
+/** Broadcast when a user toggles their own mic-mute / deafen / dnd. */
 export interface StatusPayload {
   userId: string;
   muted: boolean;
   deafened: boolean;
+  dnd: boolean;
 }
 
 export interface MovePayload {

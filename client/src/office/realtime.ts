@@ -174,9 +174,9 @@ export class OfficeChannel {
     await this.channel.send({ type: 'broadcast', event: 'music', payload: state });
   }
 
-  /** Broadcast our own mic-mute / deafen state (stored so late joiners get it). */
-  sendStatus(muted: boolean, deafened: boolean) {
-    this.status = { userId: this.me.userId, muted, deafened };
+  /** Broadcast our own mic-mute / deafen / dnd state (stored so late joiners get it). */
+  sendStatus(muted: boolean, deafened: boolean, dnd: boolean) {
+    this.status = { userId: this.me.userId, muted, deafened, dnd };
     void this.rawSendStatus(this.status);
   }
 
