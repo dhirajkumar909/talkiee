@@ -30,11 +30,13 @@ import {
   Users,
   Volume2,
   VolumeX,
+  MessageCircle,
+  Send,
   X,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthProvider';
 import { getOffice, getLivekitToken } from '../lib/api';
-import type { MusicState, Office, PresenceState, ReactionPayload } from '../types';
+import type { MusicState, Office, PresenceState, ReactionPayload, ChatMessagePayload } from '../types';
 import { OfficeChannel } from '../office/realtime';
 import {
   isNotificationSupported,
@@ -212,6 +214,16 @@ export function OfficeRoom() {
   const [muted, setMuted] = useState(true);
   const [screenSharing, setScreenSharing] = useState(false);
   const [remoteScreenShares, setRemoteScreenShares] = useState<Map<string, RemoteTrack>>(new Map());
+  const [messages, setMessages] = useState<ChatMessagePayload[]>([]);
+  const [activeTab, setActiveTab] = useState<"people" | "chat">("people");
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [messages, activeTab]);
+  const [chatInput, setChatInput] = useState('');
   const [viewingScreenShare, setViewingScreenShare] = useState<string | null>(null);
   const [roster, setRoster] = useState<
     {
@@ -524,6 +536,9 @@ export function OfficeRoom() {
       },
       onReaction: (r) => {
         reactionsRef.current.push(r);
+      },
+      onChat: (msg) => {
+        setMessages((prev) => [...prev, msg].slice(-100));
       },
     });
     channelRef.current = channel;
@@ -1597,9 +1612,25 @@ export function OfficeRoom() {
           {/* Header */}
           <div className="border-b px-5 pb-4 pt-5">
             <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold leading-tight tracking-tight">People</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">Who's around and who can hear you</p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setActiveTab('people')}
+                  className={cn(
+                    "text-lg font-semibold leading-tight tracking-tight pb-1 border-b-2 transition-colors",
+                    activeTab === 'people' ? "border-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  People
+                </button>
+                <button
+                  onClick={() => setActiveTab('chat')}
+                  className={cn(
+                    "text-lg font-semibold leading-tight tracking-tight pb-1 border-b-2 transition-colors",
+                    activeTab === 'chat' ? "border-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Chat
+                </button>
               </div>
               <div className="-mr-1.5 -mt-1 flex shrink-0 items-center gap-0.5">
               <DropdownMenu>
@@ -1669,7 +1700,9 @@ export function OfficeRoom() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 flex flex-col">
+            {activeTab === 'people' ? (
+              <div className="flex-1 overflow-y-auto pb-6">
             {/* Status banners */}
             {(!micOk || inRoom || following) && (
               <div className="space-y-2 px-5 pt-4">
@@ -1795,6 +1828,52 @@ export function OfficeRoom() {
                   onViewScreen={(id) => setViewingScreenShare(id)}
                 />
               </>
+            )}
+              </div>
+            ) : (
+              <div className="flex flex-1 flex-col min-h-0">
+                <div ref={chatScrollRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+                  {messages.length === 0 ? (
+                    <div className="flex h-full flex-col items-center justify-center text-center text-muted-foreground">
+                      <MessageCircle className="mb-2 size-8 opacity-20" />
+                      <p className="text-sm">No messages yet.</p>
+                      <p className="mt-1 text-xs">Chat with anyone currently in the office.</p>
+                    </div>
+                  ) : (
+                    messages.map((msg, i) => (
+                      <div key={i} className={cn("flex flex-col max-w-[85%]", msg.userId === profile?.id ? "ml-auto items-end" : "mr-auto items-start")}>
+                        <span className="text-[10px] text-muted-foreground mb-1 ml-1">{msg.name}</span>
+                        <div className={cn("rounded-2xl px-3 py-2 text-sm", msg.userId === profile?.id ? "bg-primary text-primary-foreground rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm")}>
+                          {msg.text}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!chatInput.trim()) return;
+                    channelRef.current?.sendChat(chatInput, profile?.display_name || 'Someone');
+                    setMessages((prev) => [...prev, { userId: profile?.id || '', name: profile?.display_name || 'Me', text: chatInput, timestamp: Date.now() }].slice(-100));
+                    setChatInput('');
+                  }}
+                  className="border-t p-3"
+                >
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Type a message..."
+                      className="flex-1 rounded-full border bg-background px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                    />
+                    <Button type="submit" size="icon" className="shrink-0 rounded-full" disabled={!chatInput.trim()}>
+                      <Send className="size-4" />
+                    </Button>
+                  </div>
+                </form>
+              </div>
             )}
           </div>
         </aside>

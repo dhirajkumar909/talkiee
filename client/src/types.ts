@@ -120,6 +120,13 @@ export interface SignalPayload {
   data: unknown;
 }
 
+export interface ChatMessagePayload {
+  userId: string;
+  name: string;
+  text: string;
+  timestamp: number;
+}
+
 /** Broadcast when a user reacts with an emoji. */
 export interface ReactionPayload {
   userId: string;
